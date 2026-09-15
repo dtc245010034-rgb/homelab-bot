@@ -1,0 +1,20 @@
+{
+  "name": "homelab-bot",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Bot Telegram quan ly homelab dog-HP",
+  "engines": {
+    "node": ">=20.4.0"
+  },
+  "dependencies": {
+    "@google/genai": "^2.22.0",
+    "axios": "^0.32.0",
+    "dotenv": "~16.0.3",
+    "exceljs": "^4.4.0",
+    "form-data": "~4.0.5",
+    "ping": "^1.0.0",
+    "systeminformation": "^5.31.7",
+    "wakeonlan": "^0.1.0",
+    "xml2js": "^0.6.2"
+  }
+}

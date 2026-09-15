@@ -1,0 +1,15 @@
+# Secrets - KHONG BAO GIO commit
+.env
+.pihole-secret
+
+# Dependencies - regenerate bang npm install (package-lock.json da duoc track)
+node_modules/
+
+# State / du lieu runtime - sinh ra khi chay, khong phai source code
+agent-workspace/sessions/
+agent-workspace/logs/
+scheduler/jobs.json
+schedule/*.xlsx
+schedule/archive/
+pihole-weekly.json
+.motion-state
