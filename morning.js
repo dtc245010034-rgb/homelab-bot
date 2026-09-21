@@ -209,7 +209,7 @@ async function sendMorningReport() {
 }
 
 // ─── Exports ──────────────────────────────────────────────
-module.exports = { sendMorningReport, getETFPrice };
+module.exports = { sendMorningReport, getETFPrice, getWeather, getRSS };
 
 if (require.main === module) {
   sendMorningReport().catch(console.error);

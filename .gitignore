@@ -13,3 +13,8 @@ schedule/*.xlsx
 schedule/archive/
 pihole-weekly.json
 .motion-state
+scheduler/pin-state.json
+schedule/.rollover-in-progress
+
+# Bo nho dai han do agent tu ghi (co thong tin ca nhan) - repo nay public, khong commit
+agent-workspace/memory/

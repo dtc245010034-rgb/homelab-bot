@@ -34,6 +34,10 @@ const SESSION_IDLE_ARCHIVE_MS = 48 * 3600 * 1000;
 const TRIM_LAST_TURNS         = 15; // so luot user-text gan nhat giu lai khi goi API, phan cu van con nguyen trong file session
 const INDEX_MAX_LINES         = 200;
 const AGENT_LOG_MAX_BYTES     = 5 * 1024 * 1024;
+// Han muc ngay chi de HIEN THI uoc tinh cho model CHUA tung dinh 429 that (khong dung de
+// quyet dinh logic that - callGeminiWithRetry chi dua vao 429 that tu Google). Suy ra tu
+// lan gemini-3.6-flash dinh 429 that voi quotaValue=20 (xem gemini-api-real-findings).
+const ASSUMED_DAILY_LIMIT_DISPLAY = 20;
 
 const ai = GEMINI_API_KEY ? new GoogleGenAI({ apiKey: GEMINI_API_KEY }) : null;
 
@@ -100,12 +104,19 @@ function appendContents(chatId, session, newContents) {
 // vi Gemini se bao loi neu thay 1 functionResponse ma khong co functionCall truoc do trong contents gui len.
 function trimForApi(contents) {
   let userTextTurns = 0;
+  let cutIndex = null; // vi tri luot user-text CU NHAT trong so cac luot duoc GIU lai -
+                        // cat DUNG TAI day (khong phai i+1) de dam bao turn dau tien sau khi
+                        // cat luon la role 'user' that - i+1 co the roi vao giua 1 cap
+                        // functionCall/functionResponse (bug that gap: Gemini 400 "function
+                        // call turn phai ngay sau user turn" khi payload bi cat bat dau bang
+                        // 1 model-functionCall turn mo coi).
   for (let i = contents.length - 1; i >= 0; i--) {
     const c = contents[i];
     const isUserText = c.role === 'user' && (c.parts || []).some(p => typeof p.text === 'string');
     if (isUserText) {
       userTextTurns++;
-      if (userTextTurns > TRIM_LAST_TURNS) return contents.slice(i + 1);
+      if (userTextTurns === TRIM_LAST_TURNS) cutIndex = i;
+      if (userTextTurns > TRIM_LAST_TURNS) return contents.slice(cutIndex);
     }
   }
   return contents;
@@ -198,14 +209,12 @@ function readQuota() {
   const today = getPacificDateString();
   const q = readJsonSafe(QUOTA_FILE, null);
   if (!q || q.date !== today) return freshQuotaState(today);
+  delete q.count; // field rac tu thiet ke counter don truoc khi co multi-model, khong con dung
   // dien bu field neu file cu (truoc khi co multi-model) hoac thieu field
   if (!q.byModel) q.byModel = {};
   if (!q.exhaustedModels) q.exhaustedModels = [];
   if (!q.limits) q.limits = {};
   if (!q.currentModel || !MODEL_CANDIDATES.includes(q.currentModel)) q.currentModel = MODEL_CANDIDATES[0];
-  if (q.exhaustedModels.includes(q.currentModel)) {
-    q.currentModel = MODEL_CANDIDATES.find(m => !q.exhaustedModels.includes(m)) || q.currentModel;
-  }
   return q;
 }
 
@@ -305,27 +314,38 @@ async function callGeminiWithRetry(payloadBase) {
 // ─── Factory chinh - nhan dependency tu bot.js, KHONG require('./bot') nguoc lai ──
 function createAgent(deps) {
   const {
-    send, render, getSystemStatus, getPiholeStats, sendDocument,
+    send, render, getSystemStatus, getPiholeStats, sendDocument, getWeather, getNews,
     addReminderJob, listReminderJobs, cancelReminderJob,
     addScheduleItem, viewScheduleText, clearScheduleWeek, getCurrentWeekPath,
-    removeScheduleItem,
+    removeScheduleItem, weekRangeLabel,
   } = deps;
 
   const busyByChat    = new Map(); // chatId -> true khi dang chay tool-loop (bao gom ca luc cho xac nhan)
   const confirmByChat = new Map(); // chatId -> { resolve } khi dang cho yes/no cho 1 tool co tac dong
-  // chatId -> filePath lich tuan can gui. Tool addScheduleItem/clearSchedule chi "dang ky" vao day
-  // thay vi tu goi sendDocument ngay - tranh 1 request /agent goi tool nhieu lan (vd them 6 buoi hoc
-  // cung luc) lai gui 6 file Telegram rieng le. Gui gop dung 1 lan sau khi ca tool-loop cua request xong.
+  // chatId -> Set<filePath> lich tuan can gui. Tool addScheduleItem/clearSchedule/sendScheduleFile
+  // chi "dang ky" vao day thay vi tu goi sendDocument ngay - tranh 1 request /agent goi tool nhieu
+  // lan (vd them 6 buoi hoc cung luc) lai gui 6 file Telegram rieng le. Gui gop 1 lan sau khi ca
+  // tool-loop cua request xong. Dung Set (khong phai filePath don) vi voi lich 4-tuan, 1 request co
+  // the dung DUNG lieu 2 tuan khac nhau (vd "xem+gui lich tuan nay va tuan sau" trong 1 cau) - dung
+  // gia tri don se bi tuan sau de mat tuan nay (bug that gap: chi con 1 file duoc gui du dang le 2).
+  // Set tu khu trung neu cung 1 file duoc dang ky nhieu lan (vd 3 lan addScheduleItem cung 1 tuan).
   const pendingScheduleFile = new Map();
 
+  function queueScheduleFile(chatId, filePath) {
+    if (!pendingScheduleFile.has(chatId)) pendingScheduleFile.set(chatId, new Set());
+    pendingScheduleFile.get(chatId).add(filePath);
+  }
+
   async function flushPendingScheduleFile(chatId) {
-    const filePath = pendingScheduleFile.get(chatId);
-    if (!filePath) return;
+    const filePaths = pendingScheduleFile.get(chatId);
+    if (!filePaths || filePaths.size === 0) return;
     pendingScheduleFile.delete(chatId);
-    try {
-      await sendDocument(chatId, filePath, 'Lịch tuần đã cập nhật');
-    } catch (e) {
-      logToolCall({ chatId, tool: 'sendDocument', ok: false, error: e.message });
+    for (const filePath of filePaths) {
+      try {
+        await sendDocument(chatId, filePath, 'Lịch tuần đã cập nhật');
+      } catch (e) {
+        logToolCall({ chatId, tool: 'sendDocument', ok: false, error: e.message });
+      }
     }
   }
 
@@ -341,6 +361,18 @@ function createAgent(deps) {
       description: 'Lay thong ke Pi-hole hien tai (so query, so bi chan, trang thai bat/tat DNS).',
       parametersJsonSchema: { type: 'object', properties: {} },
       handler: async () => getPiholeStats(),
+    },
+    getWeather: {
+      requiresConfirm: false,
+      description: 'Lay du bao thoi tiet hien tai va vai gio toi o Thai Nguyen (nhiet do, do am, canh bao mua/nong/lanh).',
+      parametersJsonSchema: { type: 'object', properties: {} },
+      handler: async () => ({ text: await getWeather() }),
+    },
+    getNews: {
+      requiresConfirm: false,
+      description: 'Lay tin moi nhat tu Hacker News, VnExpress Kinh doanh, CafeBiz Cong nghe, VnEconomy, dev.to.',
+      parametersJsonSchema: { type: 'object', properties: {} },
+      handler: async () => ({ text: await getNews() }),
     },
     remember: {
       requiresConfirm: false,
@@ -378,66 +410,85 @@ function createAgent(deps) {
     },
     addScheduleItem: {
       requiresConfirm: false,
-      description: 'Thêm 1 việc vào lịch tuần hiện tại (không ghi đè, tự nối thêm nếu ô đã có việc khác).',
+      description: 'Thêm 1 việc vào lịch (không ghi đè, tự nối thêm nếu ô đã có việc khác). Hỗ trợ lên lịch trước tối đa 3 tuần kể từ hôm nay.',
       parametersJsonSchema: {
         type: 'object',
         properties: {
-          dayOfWeek: { type: 'string', enum: ['Thứ 2', 'Thứ 3', 'Thứ 4', 'Thứ 5', 'Thứ 6', 'Thứ 7', 'Chủ nhật'] },
-          session:   { type: 'string', enum: ['Sáng', 'Chiều', 'Tối'] },
-          time:      { type: 'string', description: 'Giờ cụ thể dạng "14h" hoặc "14:00"' },
-          content:   { type: 'string' },
+          date:    { type: 'string', pattern: '^\\d{4}-\\d{2}-\\d{2}$', description: 'Ngày dạng YYYY-MM-DD, tối đa 3 tuần kể từ hôm nay (tính từ ngày hiện tại trong system instruction)' },
+          session: { type: 'string', enum: ['Sáng', 'Chiều', 'Tối'] },
+          time:    { type: 'string', description: 'Giờ cụ thể dạng "14h" hoặc "14:00"' },
+          content: { type: 'string' },
         },
-        required: ['dayOfWeek', 'session', 'time', 'content'],
+        required: ['date', 'session', 'time', 'content'],
       },
       handler: async (args, chatId) => {
         const filePath = await addScheduleItem(args);
-        pendingScheduleFile.set(chatId, filePath);
+        queueScheduleFile(chatId, filePath);
         return { ok: true };
       },
     },
     viewSchedule: {
       requiresConfirm: false,
-      description: 'Xem toàn bộ lịch tuần hiện tại dạng text.',
-      parametersJsonSchema: { type: 'object', properties: {} },
-      handler: async () => ({ text: await viewScheduleText() }),
+      description: 'Xem toàn bộ lịch 1 tuần cụ thể dạng text.',
+      parametersJsonSchema: {
+        type: 'object',
+        properties: {
+          weekOffset: { type: 'integer', enum: [0, 1, 2, 3], description: '0 = tuần này (mặc định), 1-3 = các tuần kế tiếp' },
+        },
+      },
+      handler: async (args) => ({ text: await viewScheduleText(args.weekOffset ?? 0) }),
     },
     clearSchedule: {
       requiresConfirm: true,
-      description: 'Xoá toàn bộ lịch tuần hiện tại (mọi việc đã thêm) và tạo lịch trống mới cho tuần này - không thể hoàn tác qua chat, cần xác nhận trước.',
-      parametersJsonSchema: { type: 'object', properties: {} },
-      describeAction: () => 'Xoá toàn bộ lịch tuần hiện tại (bản cũ vẫn được lưu trữ trên server, không mất hẳn) và tạo lịch trống mới cho tuần này.',
-      handler: async (_args, chatId) => {
-        await clearScheduleWeek();
-        const filePath = await getCurrentWeekPath();
-        pendingScheduleFile.set(chatId, filePath);
+      description: 'Xoá toàn bộ lịch 1 tuần cụ thể (mọi việc đã thêm) và tạo lịch trống mới cho tuần đó - không thể hoàn tác qua chat, cần xác nhận trước.',
+      parametersJsonSchema: {
+        type: 'object',
+        properties: {
+          weekOffset: { type: 'integer', enum: [0, 1, 2, 3], description: '0 = tuần này (mặc định), 1-3 = các tuần kế tiếp' },
+        },
+      },
+      describeAction: (args) => {
+        const weekOffset = args.weekOffset ?? 0;
+        return `Xoá toàn bộ lịch tuần ${weekRangeLabel(weekOffset)} (bản cũ vẫn được lưu trữ trên server, không mất hẳn) và tạo lịch trống mới cho tuần đó.`;
+      },
+      handler: async (args, chatId) => {
+        const weekOffset = args.weekOffset ?? 0;
+        await clearScheduleWeek(weekOffset);
+        const filePath = await getCurrentWeekPath(weekOffset);
+        queueScheduleFile(chatId, filePath);
         return { ok: true };
       },
     },
     removeScheduleItem: {
       requiresConfirm: true,
-      description: 'Xoá nội dung 1 ô cụ thể trong lịch tuần (theo dayOfWeek + session), không đụng các ô khác - không thể hoàn tác qua chat, cần xác nhận trước. Nếu người dùng muốn xoá nhiều ô, gọi tool này nhiều lần (mỗi lần 1 ô).',
+      description: 'Xoá nội dung 1 ô cụ thể trong lịch (theo date + session), không đụng các ô khác - không thể hoàn tác qua chat, cần xác nhận trước. Nếu người dùng muốn xoá nhiều ô, gọi tool này nhiều lần (mỗi lần 1 ô).',
       parametersJsonSchema: {
         type: 'object',
         properties: {
-          dayOfWeek: { type: 'string', enum: ['Thứ 2', 'Thứ 3', 'Thứ 4', 'Thứ 5', 'Thứ 6', 'Thứ 7', 'Chủ nhật'] },
-          session:   { type: 'string', enum: ['Sáng', 'Chiều', 'Tối'] },
+          date:    { type: 'string', pattern: '^\\d{4}-\\d{2}-\\d{2}$', description: 'Ngày dạng YYYY-MM-DD' },
+          session: { type: 'string', enum: ['Sáng', 'Chiều', 'Tối'] },
         },
-        required: ['dayOfWeek', 'session'],
+        required: ['date', 'session'],
       },
-      describeAction: (args) => `Xoá nội dung ô lịch "${escapeHtml(args.dayOfWeek)} - ${escapeHtml(args.session)}".`,
+      describeAction: (args) => `Xoá nội dung ô lịch ngày "${escapeHtml(args.date)} - ${escapeHtml(args.session)}".`,
       handler: async (args, chatId) => {
         const filePath = await removeScheduleItem(args);
-        pendingScheduleFile.set(chatId, filePath);
+        queueScheduleFile(chatId, filePath);
         return { ok: true };
       },
     },
     sendScheduleFile: {
       requiresConfirm: false,
-      description: 'Gửi lại file Excel lịch tuần hiện tại cho người dùng, không thêm/sửa/xoá gì cả.',
-      parametersJsonSchema: { type: 'object', properties: {} },
-      handler: async (_args, chatId) => {
-        const filePath = await getCurrentWeekPath();
-        pendingScheduleFile.set(chatId, filePath);
+      description: 'Gửi lại file Excel của 1 tuần cụ thể cho người dùng, không thêm/sửa/xoá gì cả.',
+      parametersJsonSchema: {
+        type: 'object',
+        properties: {
+          weekOffset: { type: 'integer', enum: [0, 1, 2, 3], description: '0 = tuần này (mặc định), 1-3 = các tuần kế tiếp' },
+        },
+      },
+      handler: async (args, chatId) => {
+        const filePath = await getCurrentWeekPath(args.weekOffset ?? 0);
+        queueScheduleFile(chatId, filePath);
         return { ok: true };
       },
     },
@@ -569,22 +620,47 @@ function createAgent(deps) {
     }
   }
 
+  function buildModelPanel() {
+    const q = readQuota();
+    const lines = MODEL_CANDIDATES.map(m => {
+      const used = q.byModel[m] || 0;
+      const exhausted = q.exhaustedModels.includes(m);
+      const limit = q.limits[m] != null ? q.limits[m] : `~${ASSUMED_DAILY_LIMIT_DISPLAY}`;
+      const marker = m === q.currentModel ? ' ⬅️ đang dùng' : '';
+      return `▸ <code>${m}</code>: ${used}/${limit}${exhausted ? ' (hết quota hôm nay)' : ''}${marker}`;
+    }).join('\n');
+    const text =
+      `<b>MODEL GEMINI</b>\n<blockquote>${lines}\n` +
+      `Số không có dấu "~" là Google báo thật (đã từng dính hết quota), còn lại là bot tự đếm ước tính. ` +
+      `Quota reset theo giờ Mỹ (Pacific), không theo lịch VN.</blockquote>`;
+    const buttons = MODEL_CANDIDATES.map((m, i) => [{ text: m, callback_data: `agent_model_${i}` }]);
+    buttons.push([{ text: '🔄 Làm mới', callback_data: 'cmd_agentmodel' }, { text: '◀ Menu chính', callback_data: 'cmd_help' }]);
+    return { text, buttons };
+  }
+
+  async function handleModelPanel(chatId, msgId) {
+    const { text, buttons } = buildModelPanel();
+    await render(chatId, text, buttons, msgId);
+  }
+
+  function setModelManually(index) {
+    if (!Number.isInteger(index) || index < 0 || index >= MODEL_CANDIDATES.length) return false;
+    const q = readQuota();
+    const model = MODEL_CANDIDATES[index];
+    q.currentModel = model;
+    // Chon tay 1 model du no dang bi danh dau het quota -> cho no 1 co hoi that (bo khoi
+    // exhaustedModels) thay vi chi doi nhan hien thi - vd de thu lai model da tung 429 xem
+    // da phuc hoi chua (da tung quan sat phuc hoi som hon 1 ngay, xem gemini-api-real-findings).
+    q.exhaustedModels = q.exhaustedModels.filter(m => m !== model);
+    writeJsonAtomic(QUOTA_FILE, q);
+    return true;
+  }
+
   async function handleAgent(chatId, rawText) {
     const userText = (rawText || '').trim();
 
     if (userText.toLowerCase() === 'quota') {
-      const q = readQuota();
-      const lines = MODEL_CANDIDATES.map(m => {
-        const used = q.byModel[m] || 0;
-        const limit = q.limits[m];
-        const exhausted = q.exhaustedModels.includes(m);
-        const marker = m === q.currentModel ? ' ⬅️ đang dùng' : '';
-        const limitStr = limit != null ? `/${limit}` : '';
-        return `▸ <code>${m}</code>: ${used}${limitStr}${exhausted ? ' (hết quota hôm nay)' : ''}${marker}`;
-      }).join('\n');
-      await send(chatId,
-        `<b>QUOTA GEMINI (ƯỚC TÍNH)</b>\n<blockquote>${lines}\nSố lần bot tự đếm, KHÔNG phải số liệu chính thức từ Google (trừ số sau dấu "/" khi đã từng dính hết quota - đó là số Google báo thật).</blockquote>`
-      );
+      await handleModelPanel(chatId);
       return;
     }
     if (!userText) {
@@ -611,6 +687,18 @@ function createAgent(deps) {
         session = freshSession();
         await send(chatId, '<blockquote>Đã im lặng quá 48h - bắt đầu phiên hội thoại mới (phiên cũ đã được lưu lại).</blockquote>');
       }
+
+      // Tu lanh phan duoi hong: neu lan handleAgent truoc bi timeout/loi/cham MAX_TOOL_LOOPS
+      // giua chung tool-loop, session co the con "treo" 1+ luot cuoi khong phai role 'model'
+      // (mot cau user chua duoc tra loi, hoac 1 functionResponse chua duoc model xu ly tiep).
+      // Gui nguyen contents nhu vay cho Gemini se bi tu choi 400 "function call turn phai
+      // ngay sau user/functionResponse turn". Cat bo cac luot treo do truoc khi ghi cau hoi moi.
+      let trimmed = false;
+      while (session.contents.length > 0 && session.contents[session.contents.length - 1].role !== 'model') {
+        session.contents.pop();
+        trimmed = true;
+      }
+      if (trimmed) saveSession(chatId, session);
 
       appendContents(chatId, session, [{ role: 'user', parts: [{ text: userText }] }]);
 
@@ -682,7 +770,7 @@ function createAgent(deps) {
     await send(chatId, '<b>PHIÊN MỚI</b>\n<blockquote>Đã lưu lại phiên cũ, bắt đầu hội thoại mới.</blockquote>');
   }
 
-  return { handleAgent, handleConfirmReply, resetSession };
+  return { handleAgent, handleConfirmReply, resetSession, handleModelPanel, setModelManually };
 }
 
 function getCurrentModel() {

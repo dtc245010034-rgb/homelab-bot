@@ -9,7 +9,7 @@ const path   = require('path');
 const { exec } = require('child_process');
 const util   = require('util');
 const FormData = require('form-data');
-const { sendMorningReport, getETFPrice } = require('./morning');
+const { sendMorningReport, getETFPrice, getWeather, getRSS } = require('./morning');
 const { generateWeatherMap } = require('./wmap');
 const { createAgent, getCurrentModel } = require('./agent');
 const { createScheduler } = require('./scheduler');
@@ -48,28 +48,41 @@ async function render(chatId, text, buttons = null, messageId = null) {
   if (messageId) {
     try {
       await axios.post(`${API}/editMessageText`, { ...payload, message_id: messageId }, { timeout: 8000 });
-      return;
+      return messageId;
     } catch (err) {
-      if (err.response?.data?.description?.includes('message is not modified')) return;
+      if (err.response?.data?.description?.includes('message is not modified')) return messageId;
       // If edit fails (e.g., photo message), fallback to send
     }
   }
 
   try {
-    await axios.post(`${API}/sendMessage`, payload, { timeout: 10000 });
+    const { data } = await axios.post(`${API}/sendMessage`, payload, { timeout: 10000 });
+    return data?.result?.message_id;
   } catch (e) {
     console.error('[render error]', e.message);
   }
 }
 
 async function send(chatId, text) {
-  await render(chatId, text);
+  return render(chatId, text);
 }
 
 async function answerCb(id, text = '') {
   try {
     await axios.post(`${API}/answerCallbackQuery`, { callback_query_id: id, text }, { timeout: 4000 });
   } catch {}
+}
+
+async function pinMessage(chatId, messageId) {
+  try {
+    await axios.post(`${API}/pinChatMessage`, { chat_id: chatId, message_id: messageId, disable_notification: true }, { timeout: 8000 });
+  } catch (e) { console.error('[pinMessage error]', e.message); }
+}
+
+async function unpinMessage(chatId, messageId) {
+  try {
+    await axios.post(`${API}/unpinChatMessage`, { chat_id: chatId, message_id: messageId }, { timeout: 8000 });
+  } catch (e) { console.error('[unpinMessage error]', e.message); }
 }
 
 async function sendDocument(chatId, filePath, caption) {
@@ -843,6 +856,9 @@ async function handleHelp(chatId, msgId = null) {
       { text: '🌅 Báo cáo ngày', callback_data: 'cmd_morning' },
       { text: '📊 Tổng kết tuần', callback_data: 'cmd_weekly' },
       { text: '🔄 Khởi động lại', callback_data: 'cmd_reboot' }
+    ],
+    [
+      { text: 'Model Gemini', callback_data: 'cmd_agentmodel' }
     ]
   ];
 
@@ -864,7 +880,8 @@ async function handleHelp(chatId, msgId = null) {
     `▸ <code>/agent quota</code> — Xem quota Gemini đã dùng ước tính hôm nay\n` +
     `▸ <code>/new</code> hoặc <code>/reset</code> — Bắt đầu phiên hội thoại mới\n` +
     `▸ Lịch tuần: "thêm vào lịch thứ 4 chiều 14h họp nhóm", "xem lịch tuần này", "gửi lại file lịch", "xoá sáng thứ 7" (cần xác nhận), "xoá hết lịch tuần này" (cần xác nhận)\n` +
-    `▸ Nhắc việc: "nhắc tôi 8h tối nay uống thuốc", "nhắc tôi thứ 6 hàng tuần đổ rác", "xem các nhắc việc", "huỷ nhắc ..."` +
+    `▸ Nhắc việc: "nhắc tôi 8h tối nay uống thuốc", "nhắc tôi thứ 6 hàng tuần đổ rác", "xem các nhắc việc", "huỷ nhắc ..."\n` +
+    `▸ Thông tin: "thời tiết hôm nay thế nào", "có tin gì mới không"` +
     `</blockquote>`;
 
   await render(chatId, text, buttons, msgId);
@@ -881,19 +898,21 @@ const systemActions = {
   },
 };
 
-const schedulerApi = createScheduler({ send, systemActions });
+const schedulerApi = createScheduler({ send, systemActions, pinMessage, unpinMessage });
 schedulerApi.start();
 
 const agentApi = createAgent({
   send, render, getSystemStatus, getPiholeStats, sendDocument,
+  getWeather, getNews: getRSS,
   addReminderJob: schedulerApi.addJob,
   listReminderJobs: schedulerApi.listJobs,
   cancelReminderJob: schedulerApi.cancelJob,
   addScheduleItem: schedule.addItem,
   viewScheduleText: schedule.getWeekText,
-  clearScheduleWeek: schedule.archiveAndResetWeek,
-  getCurrentWeekPath: schedule.getCurrentWeekPath,
+  clearScheduleWeek: schedule.clearWeekSlot,
+  getCurrentWeekPath: schedule.getWeekPath,
   removeScheduleItem: schedule.removeItem,
+  weekRangeLabel: schedule.weekRangeLabel,
 });
 
 // ─── Callback & Message Router ────────────────────────────
@@ -908,6 +927,12 @@ async function processUpdate(update) {
         return;
       }
       await answerCb(cb.id);
+
+      if (cb.data.startsWith('agent_model_')) {
+        agentApi.setModelManually(parseInt(cb.data.slice('agent_model_'.length), 10));
+        await agentApi.handleModelPanel(chatId, msgId);
+        return;
+      }
 
       switch (cb.data) {
         case 'cmd_help':     await handleHelp(chatId, msgId); break;
@@ -935,6 +960,7 @@ async function processUpdate(update) {
         case 'cmd_morning':  await sendMorningReport(); break;
         case 'cmd_weekly':   await handleWeekly(chatId, msgId); break;
         case 'cmd_reboot':   await handleReboot(chatId, msgId); break;
+        case 'cmd_agentmodel': await agentApi.handleModelPanel(chatId, msgId); break;
         case 'pihole_on':    await setPiholeBlocking(true);       await render(chatId, '<b>PI-HOLE DNS</b>\n<blockquote>Đã bật lại Pi-hole thành công.</blockquote>', [[{ text: '◀ Menu chính', callback_data: 'cmd_help' }]], msgId); break;
         case 'pihole_off_0': await setPiholeBlocking(false);      await render(chatId, '<b>PI-HOLE DNS</b>\n<blockquote>Đã tắt Pi-hole.</blockquote>', [[{ text: '◀ Menu chính', callback_data: 'cmd_help' }]], msgId); break;
         case 'pihole_off_5': await setPiholeBlocking(false, 300); await render(chatId, '<b>PI-HOLE DNS</b>\n<blockquote>Đã tắt Pi-hole trong 5 phút.</blockquote>', [[{ text: '◀ Menu chính', callback_data: 'cmd_help' }]], msgId); break;
@@ -952,7 +978,15 @@ async function processUpdate(update) {
       return;
     }
     if (!msg.text) {
-      await send(chatId, '<b>CHƯA HỖ TRỢ</b>\n<blockquote>Bot chưa hỗ trợ nhận file/ảnh trực tiếp. Dùng <code>/agent &lt;mô tả bằng lời&gt;</code> để nhờ AI xử lý (thêm lịch, đặt nhắc việc...).</blockquote>');
+      // Telegram cung gui update dang "message" cho cac service message KHONG PHAI do
+      // nguoi dung upload (vd: tu ghim/bo ghim tin - pinned_message, doi ten/anh nhom...).
+      // Co the tu bot tao ra (pin nhac viec cua chinh scheduler.js) - phai bo qua LANG LE,
+      // chi tra loi "CHUA HO TRO" khi msg thuc su chua noi dung nguoi dung UPLOAD.
+      const isUserUpload = msg.photo || msg.document || msg.video || msg.voice ||
+        msg.audio || msg.sticker || msg.video_note || msg.animation;
+      if (isUserUpload) {
+        await send(chatId, '<b>CHƯA HỖ TRỢ</b>\n<blockquote>Bot chưa hỗ trợ nhận file/ảnh trực tiếp. Dùng <code>/agent &lt;mô tả bằng lời&gt;</code> để nhờ AI xử lý (thêm lịch, đặt nhắc việc...).</blockquote>');
+      }
       return;
     }
 

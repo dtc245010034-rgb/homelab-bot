@@ -4,6 +4,7 @@ const fsutil = require('./fsutil');
 
 const SCHEDULER_DIR = path.join(__dirname, 'scheduler');
 const JOBS_FILE      = path.join(SCHEDULER_DIR, 'jobs.json');
+const PIN_STATE_FILE = path.join(SCHEDULER_DIR, 'pin-state.json');
 const TICK_MS        = 45_000;
 
 function ensureSchedulerDir() {
@@ -46,7 +47,7 @@ function computeNextFireAt(schedule, now) {
   throw new Error(`Unknown schedule.kind: ${schedule.kind}`);
 }
 
-function createScheduler({ send, systemActions }) {
+function createScheduler({ send, systemActions, pinMessage, unpinMessage }) {
   async function tick() {
     const now = Date.now();
     const jobs = loadJobs();
@@ -57,7 +58,15 @@ function createScheduler({ send, systemActions }) {
     for (const job of due) {
       try {
         if (job.type === 'message') {
-          await send(job.chatId, job.message);
+          const messageId = await send(job.chatId, job.message);
+          if (pinMessage && messageId) {
+            const pinState = fsutil.readJsonSafe(PIN_STATE_FILE, null);
+            if (pinState && pinState.chatId === job.chatId && pinState.messageId) {
+              await unpinMessage(job.chatId, pinState.messageId);
+            }
+            await pinMessage(job.chatId, messageId);
+            fsutil.writeJsonAtomic(PIN_STATE_FILE, { chatId: job.chatId, messageId });
+          }
         } else if (job.type === 'system') {
           const fn = systemActions[job.action];
           if (fn) await fn(job);

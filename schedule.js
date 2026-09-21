@@ -38,6 +38,51 @@ function fmtDDMM(date) {
   return `${dd}/${mm}`;
 }
 
+const UPCOMING_PATHS = [1, 2, 3].map(n => path.join(SCHEDULE_DIR, `upcoming-${n}.xlsx`));
+const WEEK_PATHS      = [CURRENT_PATH, ...UPCOMING_PATHS]; // index = weekOffset 0..3
+const ROLLOVER_MARKER = path.join(SCHEDULE_DIR, '.rollover-in-progress');
+
+function assertValidWeekOffset(weekOffset) {
+  if (!Number.isInteger(weekOffset) || weekOffset < 0 || weekOffset > 3) {
+    throw new Error(`weekOffset không hợp lệ (chỉ 0-3): ${weekOffset}`);
+  }
+}
+
+// 1 nguon tinh Monday cho 1 weekOffset - moi noi can "tuan nao" deu goi qua day, nhan `now`
+// tu ngoai (khong tu goi new Date() rieng) de tranh 2 buoc tinh trong CUNG 1 thao tac bi lech
+// nhau neu vo tinh vat qua dung ranh gioi nua dem Thu 2 - dung convention da co san o
+// scheduler.js (computeNextFireAt(schedule, now)).
+function weekStartDate(weekOffset, now = new Date()) {
+  assertValidWeekOffset(weekOffset);
+  return new Date(mondayOf(now).getTime() + weekOffset * 7 * 24 * 3600 * 1000);
+}
+
+function parseISODate(dateStr) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(dateStr).trim());
+  if (!m) throw new Error(`date không hợp lệ, cần dạng YYYY-MM-DD: "${dateStr}"`);
+  const d = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3])); // local time, tranh lech ngay do UTC
+  d.setHours(0, 0, 0, 0);
+  return d;
+}
+
+function resolveWeekSlot(dateStr, now = new Date()) {
+  const target = parseISODate(dateStr);
+  const todayMonday = mondayOf(now);
+  const targetMonday = mondayOf(target);
+  const weekOffset = Math.round((targetMonday - todayMonday) / (7 * 24 * 3600 * 1000));
+  if (weekOffset < 0 || weekOffset > 3) {
+    const maxSunday = sundayOf(weekStartDate(3, now));
+    throw new Error(`Ngày "${dateStr}" ngoài phạm vi hỗ trợ (chỉ từ ${fmtDDMM(todayMonday)} đến ${fmtDDMM(maxSunday)}).`);
+  }
+  return { weekOffset, dayIdx: JS_DOW_TO_DAYS_INDEX[target.getDay()] };
+}
+
+function weekRangeLabel(weekOffset, now = new Date()) {
+  const start = weekStartDate(weekOffset, now);
+  const end = new Date(start.getTime() + 6 * 24 * 3600 * 1000);
+  return `${fmtDDMM(start)}-${fmtDDMM(end)}`;
+}
+
 async function buildBlankWorkbook(weekStart) {
   const weekEnd = new Date(weekStart);
   weekEnd.setDate(weekEnd.getDate() + 6);
@@ -76,22 +121,27 @@ async function writeWorkbookAtomic(wb, filePath) {
   fs.renameSync(tmp, filePath);
 }
 
-async function ensureCurrentWeek() {
-  if (fs.existsSync(CURRENT_PATH)) return;
-  const wb = await buildBlankWorkbook(mondayOf(new Date()));
-  await writeWorkbookAtomic(wb, CURRENT_PATH);
+async function ensureWeekFile(weekOffset, now = new Date()) {
+  assertValidWeekOffset(weekOffset); // goi truoc tien, khong dua vao weekStartDate() vi ham do
+                                      // chi chay khi file CHUA ton tai - truong hop pho bien
+                                      // nhat (file da co san) se lot qua neu khong kiem tra o day.
+  const p = WEEK_PATHS[weekOffset];
+  if (fs.existsSync(p)) return;
+  const wb = await buildBlankWorkbook(weekStartDate(weekOffset, now));
+  await writeWorkbookAtomic(wb, p);
 }
 
-async function addItem({ dayOfWeek, session, time, content }) {
-  await ensureCurrentWeek();
-
-  const dayIdx = DAYS.indexOf(dayOfWeek);
+async function addItem({ date, session, time, content }) {
+  const now = new Date();
+  const { weekOffset, dayIdx } = resolveWeekSlot(date, now);
   const sessionIdx = SESSIONS.indexOf(session);
-  if (dayIdx === -1) throw new Error(`dayOfWeek không hợp lệ: "${dayOfWeek}"`);
   if (sessionIdx === -1) throw new Error(`session không hợp lệ: "${session}"`);
 
+  await ensureWeekFile(weekOffset, now);
+  const filePath = WEEK_PATHS[weekOffset];
+
   const wb = new ExcelJS.Workbook();
-  await wb.xlsx.readFile(CURRENT_PATH);
+  await wb.xlsx.readFile(filePath);
   const ws = wb.getWorksheet('LichTuan');
 
   const col = 2 + dayIdx;
@@ -101,39 +151,40 @@ async function addItem({ dayOfWeek, session, time, content }) {
   cell.value = cell.value ? `${cell.value}\n${line}` : line;
   cell.alignment = { wrapText: true, vertical: 'top' };
 
-  await writeWorkbookAtomic(wb, CURRENT_PATH);
-  return CURRENT_PATH;
+  await writeWorkbookAtomic(wb, filePath);
+  return filePath;
 }
 
-async function removeItem({ dayOfWeek, session }) {
-  await ensureCurrentWeek();
-
-  const dayIdx = DAYS.indexOf(dayOfWeek);
+async function removeItem({ date, session }) {
+  const now = new Date();
+  const { weekOffset, dayIdx } = resolveWeekSlot(date, now);
   const sessionIdx = SESSIONS.indexOf(session);
-  if (dayIdx === -1) throw new Error(`dayOfWeek không hợp lệ: "${dayOfWeek}"`);
   if (sessionIdx === -1) throw new Error(`session không hợp lệ: "${session}"`);
 
+  await ensureWeekFile(weekOffset, now);
+  const filePath = WEEK_PATHS[weekOffset];
+
   const wb = new ExcelJS.Workbook();
-  await wb.xlsx.readFile(CURRENT_PATH);
+  await wb.xlsx.readFile(filePath);
   const ws = wb.getWorksheet('LichTuan');
 
   const col = 2 + dayIdx;
   const row = 3 + sessionIdx;
   ws.getRow(row).getCell(col).value = '';
 
-  await writeWorkbookAtomic(wb, CURRENT_PATH);
-  return CURRENT_PATH;
+  await writeWorkbookAtomic(wb, filePath);
+  return filePath;
 }
 
-async function getCurrentWeekPath() {
-  await ensureCurrentWeek();
-  return CURRENT_PATH;
+async function getWeekPath(weekOffset = 0) {
+  await ensureWeekFile(weekOffset);
+  return WEEK_PATHS[weekOffset];
 }
 
-async function readGrid() {
-  await ensureCurrentWeek();
+async function readGrid(weekOffset = 0) {
+  await ensureWeekFile(weekOffset);
   const wb = new ExcelJS.Workbook();
-  await wb.xlsx.readFile(CURRENT_PATH);
+  await wb.xlsx.readFile(WEEK_PATHS[weekOffset]);
   const ws = wb.getWorksheet('LichTuan');
   const titleText = ws.getCell('A1').value;
   const grid = {};
@@ -147,8 +198,8 @@ async function readGrid() {
   return { titleText, grid };
 }
 
-async function getWeekText() {
-  const { titleText, grid } = await readGrid();
+async function getWeekText(weekOffset = 0) {
+  const { titleText, grid } = await readGrid(weekOffset);
   const lines = [titleText];
   for (const day of DAYS) {
     for (const s of SESSIONS) {
@@ -161,7 +212,7 @@ async function getWeekText() {
 }
 
 async function getTodayDigestText() {
-  const { grid } = await readGrid();
+  const { grid } = await readGrid(0);
   const dayIdx = JS_DOW_TO_DAYS_INDEX[new Date().getDay()];
   const day = DAYS[dayIdx];
   const lines = [];
@@ -174,34 +225,61 @@ async function getTodayDigestText() {
 }
 
 async function archiveAndResetWeek() {
-  await ensureCurrentWeek();
+  const now = new Date();
+  for (let i = 0; i < 4; i++) await ensureWeekFile(i, now);
 
-  const yesterday = new Date();
-  yesterday.setDate(yesterday.getDate() - 1);
-  const mon = mondayOf(yesterday);
-  const sun = sundayOf(yesterday);
-  const baseName = `${fmtDDMM(mon).replace('/', '-')}_${fmtDDMM(sun).replace('/', '-')}`;
-
-  ensureScheduleDirs();
-  // Ham nay co the bi goi >1 lan trong cung 1 tuan (job he thong T2 00h VA nguoi dung
-  // chu dong xoa lich giua tuan) - tranh de rename ghi de am tham len ban archive truoc do.
-  let archiveName = `${baseName}.xlsx`;
-  let n = 2;
-  while (fs.existsSync(path.join(ARCHIVE_DIR, archiveName))) {
-    archiveName = `${baseName}_${n}.xlsx`;
-    n++;
+  // Buoc 1: archive dung file weekOffset=0 - CHI archive neu chua co marker (chua tung bat dau,
+  // hoac lan truoc da hoan tat). Neu co marker nghia la lan truoc bi ngat SAU khi archive xong
+  // nhung TRUOC khi dich chuyen xong - bo qua archive de tranh archive nham du lieu da promote.
+  if (!fs.existsSync(ROLLOVER_MARKER)) {
+    const yesterday = new Date(); yesterday.setDate(yesterday.getDate() - 1);
+    const baseName = `${fmtDDMM(mondayOf(yesterday)).replace('/', '-')}_${fmtDDMM(sundayOf(yesterday)).replace('/', '-')}`;
+    ensureScheduleDirs();
+    let archiveName = `${baseName}.xlsx`, n = 2;
+    while (fs.existsSync(path.join(ARCHIVE_DIR, archiveName))) { archiveName = `${baseName}_${n}.xlsx`; n++; }
+    fs.renameSync(WEEK_PATHS[0], path.join(ARCHIVE_DIR, archiveName));
+    fs.writeFileSync(ROLLOVER_MARKER, '');
   }
-  fs.renameSync(CURRENT_PATH, path.join(ARCHIVE_DIR, archiveName));
 
-  await ensureCurrentWeek();
+  // Buoc 2: dich chuyen day chuyen - MOI buoc chi rename neu nguon con ton tai (bo qua neu
+  // da lam roi tu lan chay truoc bi ngat giua chung) - toan chuoi an toan de chay lai nhieu lan.
+  if (fs.existsSync(WEEK_PATHS[1])) fs.renameSync(WEEK_PATHS[1], WEEK_PATHS[0]);
+  if (fs.existsSync(WEEK_PATHS[2])) fs.renameSync(WEEK_PATHS[2], WEEK_PATHS[1]);
+  if (fs.existsSync(WEEK_PATHS[3])) fs.renameSync(WEEK_PATHS[3], WEEK_PATHS[2]);
+
+  await ensureWeekFile(3, now);
+  fs.unlinkSync(ROLLOVER_MARKER);
+}
+
+async function clearWeekSlot(weekOffset) {
+  const now = new Date();
+  await ensureWeekFile(weekOffset, now);
+  const start = weekStartDate(weekOffset, now);
+  const end = new Date(start.getTime() + 6 * 24 * 3600 * 1000);
+  // KHONG dung weekRangeLabel() truc tiep lam ten file - chuoi do co 2 dau "/" (vd "17/09-23/09"),
+  // .replace('/','-') khong co co g chi thay dau dau tien, con lai 1 dau "/" se bi hieu nham la
+  // thu muc con khi fs.renameSync - phai tach rieng tung nua DDMM roi replace nhu ham nay lam.
+  const baseName = `${fmtDDMM(start).replace('/', '-')}_${fmtDDMM(end).replace('/', '-')}`;
+  ensureScheduleDirs();
+  let archiveName = `${baseName}.xlsx`, n = 2;
+  while (fs.existsSync(path.join(ARCHIVE_DIR, archiveName))) { archiveName = `${baseName}_${n}.xlsx`; n++; }
+  fs.renameSync(WEEK_PATHS[weekOffset], path.join(ARCHIVE_DIR, archiveName));
+  await ensureWeekFile(weekOffset, now);
+  return WEEK_PATHS[weekOffset];
 }
 
 module.exports = {
-  ensureCurrentWeek,
+  ensureWeekFile,
   addItem,
   removeItem,
-  getCurrentWeekPath,
+  getWeekPath,
   getWeekText,
   getTodayDigestText,
   archiveAndResetWeek,
+  clearWeekSlot,
+  assertValidWeekOffset,
+  weekStartDate,
+  parseISODate,
+  resolveWeekSlot,
+  weekRangeLabel,
 };
