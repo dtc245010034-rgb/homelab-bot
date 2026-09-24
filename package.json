@@ -3,6 +3,9 @@
   "version": "1.0.0",
   "private": true,
   "description": "Bot Telegram quan ly homelab dog-HP",
+  "scripts": {
+    "test": "node --test test/"
+  },
   "engines": {
     "node": ">=20.4.0"
   },
