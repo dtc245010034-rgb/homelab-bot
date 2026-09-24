@@ -47,6 +47,46 @@ function computeNextFireAt(schedule, now) {
   throw new Error(`Unknown schedule.kind: ${schedule.kind}`);
 }
 
+const SYSTEM_SEEDS = [
+  { action: 'archiveAndResetWeek',     schedule: { kind: 'weekly', dayOfWeek: 1, hour: 0,  minute: 0 } },
+  { action: 'dailyScheduleDigest',     schedule: { kind: 'daily',  hour: 6, minute: 30 } },
+  { action: 'weekendPlanningReminder', schedule: { kind: 'weekly', dayOfWeek: 6, hour: 7,  minute: 30 } },
+  { action: 'weeklyReport',            schedule: { kind: 'weekly', dayOfWeek: 1, hour: 8,  minute: 0 } },
+];
+
+function sameSchedule(a, b) {
+  return ['kind', 'dayOfWeek', 'hour', 'minute', 'atISO'].every(k => a[k] === b[k]);
+}
+
+// Hop nhat seed vao danh sach job: them seed con thieu, VA cap nhat lich cua seed da ton tai neu code
+// doi gio (chi them-neu-thieu thi doi gio trong SYSTEM_SEEDS khong bao gio co hieu luc voi jobs.json cu).
+// Ham thuan: khong sua mang dau vao. Chi dung vao job type 'system'.
+function reconcileSeeds(jobs, seeds, now) {
+  let changed = false;
+  const out = jobs.map(j => ({ ...j }));
+  for (const s of seeds) {
+    const existing = out.find(j => j.type === 'system' && j.action === s.action);
+    if (!existing) {
+      out.push({
+        id: crypto.randomUUID().slice(0, 8),
+        chatId: null,
+        type: 'system',
+        action: s.action,
+        schedule: s.schedule,
+        nextFireAt: computeNextFireAt(s.schedule, now).toISOString(),
+        active: true,
+        createdAt: now.toISOString(),
+      });
+      changed = true;
+    } else if (!sameSchedule(existing.schedule || {}, s.schedule)) {
+      existing.schedule = s.schedule;
+      existing.nextFireAt = computeNextFireAt(s.schedule, now).toISOString();
+      changed = true;
+    }
+  }
+  return { jobs: out, changed };
+}
+
 function createScheduler({ send, systemActions, pinMessage, unpinMessage }) {
   async function tick() {
     const now = Date.now();
@@ -91,28 +131,10 @@ function createScheduler({ send, systemActions, pinMessage, unpinMessage }) {
 
   function start() {
     ensureSchedulerDir();
-    const jobs = loadJobs();
-    const seeds = [
-      { action: 'archiveAndResetWeek',     schedule: { kind: 'weekly', dayOfWeek: 1, hour: 0, minute: 0 } },
-      { action: 'dailyScheduleDigest',     schedule: { kind: 'daily',  hour: 0, minute: 1 } },
-      { action: 'weekendPlanningReminder', schedule: { kind: 'weekly', dayOfWeek: 6, hour: 7, minute: 30 } },
-    ];
-    let changed = false;
-    for (const s of seeds) {
-      if (!jobs.some(j => j.type === 'system' && j.action === s.action)) {
-        jobs.push({
-          id: crypto.randomUUID().slice(0, 8),
-          chatId: null,
-          type: 'system',
-          action: s.action,
-          schedule: s.schedule,
-          nextFireAt: computeNextFireAt(s.schedule, new Date()).toISOString(),
-          active: true,
-          createdAt: new Date().toISOString(),
-        });
-        changed = true;
-      }
+    for (const s of SYSTEM_SEEDS) {
+      if (!systemActions[s.action]) console.error(`[scheduler] seed "${s.action}" chưa có handler trong systemActions`);
     }
+    const { jobs, changed } = reconcileSeeds(loadJobs(), SYSTEM_SEEDS, new Date());
     if (changed) saveJobs(jobs);
 
     setInterval(() => {
@@ -154,4 +176,4 @@ function createScheduler({ send, systemActions, pinMessage, unpinMessage }) {
   return { start, addJob, listJobs, cancelJob, tick };
 }
 
-module.exports = { createScheduler, computeNextFireAt };
+module.exports = { createScheduler, computeNextFireAt, SYSTEM_SEEDS, reconcileSeeds };

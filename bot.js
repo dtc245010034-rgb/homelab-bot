@@ -14,20 +14,22 @@ const { generateWeatherMap } = require('./wmap');
 const { createAgent, getCurrentModel } = require('./agent');
 const { createScheduler } = require('./scheduler');
 const schedule = require('./schedule');
+const { loadConfig } = require('./config');
+const { redact } = require('./lib/redact');
+const { captureSnapshot, CameraError } = require('./lib/camera');
+const { evaluateAlerts, createCooldown } = require('./lib/alerts');
+const { createDetacher } = require('./lib/detach');
 
 const execAsync = util.promisify(exec);
+const run = createDetacher(); // lenh cham chay nen, khong chan vong poll Telegram
 
 // ─── Config ───────────────────────────────────────────────
-const TOKEN         = process.env.TELEGRAM_BOT_TOKEN;
-const ALLOWED_CHAT  = 8915208045;
+const { API, CHAT_ID: ALLOWED_CHAT, CAM_RTSP, CAM_HOST, OWM_KEY } = loadConfig();
 const MAC_ADDRESS   = 'F4:B5:20:50:F1:D5';
 const MAIN_PC_IP    = '192.168.1.62';
-const API           = `https://api.telegram.org/bot${TOKEN}`;
 const PIHOLE_SECRET = path.join(os.homedir(), 'homelab-bot', '.pihole-secret');
 const MOTION_STATE  = path.join(__dirname, '.motion-state');
-const CAM_RTSP      = process.env.CAM_RTSP_URL;
 const CAM_SNAP      = '/tmp/cam_snap.jpg';
-const OWM_KEY       = process.env.OWM_API_KEY;
 
 // ─── State ────────────────────────────────────────────────
 let lastUpdateId         = 0;
@@ -39,7 +41,7 @@ let lastAlertCheck       = 0;
 async function render(chatId, text, buttons = null, messageId = null) {
   const payload = {
     chat_id: chatId,
-    text,
+    text: redact(text),
     parse_mode: 'HTML',
     disable_web_page_preview: true,
     reply_markup: buttons ? { inline_keyboard: buttons } : undefined
@@ -137,6 +139,8 @@ async function getPiholeStats() {
 }
 
 // ─── System Alerts ────────────────────────────────────────
+const alertCooldown = createCooldown(30 * 60 * 1000);
+
 async function checkAlerts() {
   try {
     const [cpu, mem, disks, temps] = await Promise.all([
@@ -145,22 +149,21 @@ async function checkAlerts() {
       si.fsSize(),
       si.cpuTemperature()
     ]);
-    const ramPct   = ((mem.total - mem.available) / mem.total) * 100;
-    const rootD    = disks.find(x => x.mount === '/') || disks[0];
-    const diskPct  = rootD?.use ?? 0;
-    const tempMain = temps.main || 0;
-    const alerts   = [];
+    const ramPct = ((mem.total - mem.available) / mem.total) * 100;
+    const rootD  = disks.find(x => x.mount === '/') || disks[0];
 
-    if (cpu.currentLoad > 85) alerts.push(`▸ CPU quá tải: <code>${cpu.currentLoad.toFixed(1)}%</code>`);
-    if (ramPct > 85)          alerts.push(`▸ RAM quá tải: <code>${ramPct.toFixed(1)}%</code>`);
-    if (diskPct > 85)         alerts.push(`▸ Dung lượng ổ cứng sắp đầy: <code>${diskPct.toFixed(1)}%</code>`);
-    if (tempMain > 78)        alerts.push(`▸ Nhiệt độ CPU cao: <code>${tempMain}°C</code>`);
+    const alerts = evaluateAlerts({
+      cpuPct: cpu.currentLoad,
+      ramPct,
+      diskPct: rootD?.use ?? 0,
+      tempC: temps.main || 0,
+    }).filter(a => alertCooldown.ready(a.key)); // moi loai canh bao toi da 1 lan / 30 phut
 
     if (alerts.length > 0) {
       await send(ALLOWED_CHAT,
         `<b>CẢNH BÁO TÀI NGUYÊN HỆ THỐNG</b>\n` +
         `<blockquote>\n` +
-        alerts.join('\n') +
+        alerts.map(a => a.text).join('\n') +
         `\n\n💡 Dùng <code>/top</code> hoặc <code>/status</code> để kiểm tra.` +
         `\n</blockquote>`
       );
@@ -363,7 +366,7 @@ async function handleNetscan(chatId, msgId = null) {
       '192.168.1.1': 'Router / Gateway',
       '192.168.1.2': 'Server (Self)',
       '192.168.1.62': 'PC Chính',
-      '192.168.1.68': 'Hikvision Camera'
+      ...(CAM_HOST ? { [CAM_HOST]: 'Hikvision Camera' } : {}),
     };
 
     const deviceList = validLines.map(line => {
@@ -586,8 +589,8 @@ async function handleMotion(chatId, args = [], msgId = null) {
 // ─── /cam ─────────────────────────────────────────────────
 async function handleCam(chatId) {
   try {
-    await execAsync(`ffmpeg -y -rtsp_transport tcp -i "${CAM_RTSP}" -vframes 1 ${CAM_SNAP} 2>/dev/null`);
-    if (!fs.existsSync(CAM_SNAP)) throw new Error('Không tạo được ảnh chụp camera');
+    if (!CAM_RTSP) throw new CameraError('Chưa cấu hình CAM_RTSP_URL trong .env');
+    await captureSnapshot(CAM_RTSP, CAM_SNAP);
 
     const form = new FormData();
     form.append('chat_id', chatId);
@@ -595,7 +598,9 @@ async function handleCam(chatId) {
     form.append('caption', `📷 Camera Snapshot — ${new Date().toLocaleString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh' })}`);
     await axios.post(`${API}/sendPhoto`, form, { headers: form.getHeaders(), timeout: 15000 });
   } catch (e) {
-    await send(chatId, `<b>LỖI CAMERA</b>\n<blockquote><code>${e.message}</code></blockquote>`);
+    console.error('[cam error]', redact(e.detail || e.message));
+    const shown = e instanceof CameraError ? e.message : redact(e.message);
+    await send(chatId, `<b>LỖI CAMERA</b>\n<blockquote><code>${shown}</code></blockquote>`);
   }
 }
 
@@ -772,8 +777,8 @@ async function handleWeekly(chatId, msgId = null) {
       `<b>TỔNG KẾT HOMELAB TRONG TUẦN</b>\n` +
       `<blockquote>` +
       `▸ <b>Uptime:</b> <code>${formatUptime(time.uptime)}</code>\n` +
-      `▸ <b>CPU TB:</b> <code>${cpu.currentLoad.toFixed(1)}%</code>\n` +
-      `▸ <b>RAM TB:</b> <code>${ramPct.toFixed(1)}%</code>\n` +
+      `▸ <b>CPU lúc này:</b> <code>${cpu.currentLoad.toFixed(1)}%</code>\n` +
+      `▸ <b>RAM lúc này:</b> <code>${ramPct.toFixed(1)}%</code>\n` +
       `▸ <b>Ổ cứng SSD:</b> <code>${diskPct.toFixed(1)}%</code> (${(rootD.used/1024**3).toFixed(1)} / ${(rootD.size/1024**3).toFixed(1)} GB)` +
       `</blockquote>` +
       etfLine +
@@ -889,6 +894,7 @@ async function handleHelp(chatId, msgId = null) {
 
 const systemActions = {
   archiveAndResetWeek: () => schedule.archiveAndResetWeek(),
+  weeklyReport: () => handleWeekly(ALLOWED_CHAT),
   dailyScheduleDigest: async () => {
     const text = await schedule.getTodayDigestText();
     if (text) await send(ALLOWED_CHAT, `<b>LỊCH HÔM NAY</b>\n<blockquote>${text}</blockquote>`);
@@ -943,21 +949,21 @@ async function processUpdate(update) {
         case 'cmd_ts':       await handleTailscale(chatId, msgId); break;
         case 'cmd_devices':  await handleNetscan(chatId, msgId); break;
         case 'cmd_ip':       await handleIp(chatId, msgId); break;
-        case 'cmd_cleanup':  await handleCleanup(chatId, msgId); break;
+        case 'cmd_cleanup':  run('cleanup', () => handleCleanup(chatId, msgId)); break;
         case 'cmd_ping':     await handlePing(chatId, msgId); break;
         case 'cmd_wol':      await handleWol(chatId, false, msgId); break;
-        case 'cmd_cam':      await handleCam(chatId); break;
+        case 'cmd_cam':      run('cam', () => handleCam(chatId)); break;
         case 'cmd_motion':   await handleMotion(chatId, [], msgId); break;
         case 'motion_on':    await handleMotion(chatId, ['on'], msgId); break;
         case 'motion_off':   await handleMotion(chatId, ['off'], msgId); break;
         case 'cmd_wmap':     await handleWmap(chatId, [], msgId); break;
-        case 'wmap_vn_rain':   await handleWmap(chatId, ['vn', 'rain'], msgId); break;
-        case 'wmap_vn_clouds': await handleWmap(chatId, ['vn', 'clouds'], msgId); break;
-        case 'wmap_vn_wind':   await handleWmap(chatId, ['vn', 'wind'], msgId); break;
-        case 'wmap_tn_rain':   await handleWmap(chatId, ['tn', 'rain'], msgId); break;
-        case 'wmap_tn_temp':   await handleWmap(chatId, ['tn', 'temp'], msgId); break;
+        case 'wmap_vn_rain':   run('wmap', () => handleWmap(chatId, ['vn', 'rain'], msgId)); break;
+        case 'wmap_vn_clouds': run('wmap', () => handleWmap(chatId, ['vn', 'clouds'], msgId)); break;
+        case 'wmap_vn_wind':   run('wmap', () => handleWmap(chatId, ['vn', 'wind'], msgId)); break;
+        case 'wmap_tn_rain':   run('wmap', () => handleWmap(chatId, ['tn', 'rain'], msgId)); break;
+        case 'wmap_tn_temp':   run('wmap', () => handleWmap(chatId, ['tn', 'temp'], msgId)); break;
         case 'cmd_pihole':   await handlePihole(chatId, [], msgId); break;
-        case 'cmd_morning':  await sendMorningReport(); break;
+        case 'cmd_morning':  run('morning', () => sendMorningReport()); break;
         case 'cmd_weekly':   await handleWeekly(chatId, msgId); break;
         case 'cmd_reboot':   await handleReboot(chatId, msgId); break;
         case 'cmd_agentmodel': await agentApi.handleModelPanel(chatId, msgId); break;
@@ -1010,15 +1016,15 @@ async function processUpdate(update) {
       case '/netscan':   await handleNetscan(chatId); break;
       case '/ip':
       case '/speedtest': await handleIp(chatId); break;
-      case '/cleanup':   await handleCleanup(chatId); break;
+      case '/cleanup':   run('cleanup', () => handleCleanup(chatId)); break;
       case '/ping':      await handlePing(chatId); break;
       case '/wol':       await handleWol(chatId, parts[1] === 'force'); break;
-      case '/cam':       await handleCam(chatId); break;
+      case '/cam':       run('cam', () => handleCam(chatId)); break;
       case '/motion':    await handleMotion(chatId, parts.slice(1)); break;
       case '/pihole':    await handlePihole(chatId, parts.slice(1)); break;
-      case '/morning':   await sendMorningReport(); break;
+      case '/morning':   run('morning', () => sendMorningReport()); break;
       case '/weekly':    await handleWeekly(chatId); break;
-      case '/wmap':      await handleWmap(chatId, parts.slice(1)); break;
+      case '/wmap':      run('wmap', () => handleWmap(chatId, parts.slice(1))); break;
       case '/reboot':    await handleReboot(chatId); break;
       case '/agent': {
         const args = parts.slice(1).join(' ');
@@ -1086,4 +1092,3 @@ async function poll() {
 }
 
 poll();
-module.exports = { handleWeekly };
