@@ -17,6 +17,7 @@ const schedule = require('./schedule');
 const { loadConfig } = require('./config');
 const { redact } = require('./lib/redact');
 const { captureSnapshot, CameraError } = require('./lib/camera');
+const { evaluateAlerts, createCooldown } = require('./lib/alerts');
 
 const execAsync = util.promisify(exec);
 
@@ -136,6 +137,8 @@ async function getPiholeStats() {
 }
 
 // ─── System Alerts ────────────────────────────────────────
+const alertCooldown = createCooldown(30 * 60 * 1000);
+
 async function checkAlerts() {
   try {
     const [cpu, mem, disks, temps] = await Promise.all([
@@ -144,22 +147,21 @@ async function checkAlerts() {
       si.fsSize(),
       si.cpuTemperature()
     ]);
-    const ramPct   = ((mem.total - mem.available) / mem.total) * 100;
-    const rootD    = disks.find(x => x.mount === '/') || disks[0];
-    const diskPct  = rootD?.use ?? 0;
-    const tempMain = temps.main || 0;
-    const alerts   = [];
+    const ramPct = ((mem.total - mem.available) / mem.total) * 100;
+    const rootD  = disks.find(x => x.mount === '/') || disks[0];
 
-    if (cpu.currentLoad > 85) alerts.push(`▸ CPU quá tải: <code>${cpu.currentLoad.toFixed(1)}%</code>`);
-    if (ramPct > 85)          alerts.push(`▸ RAM quá tải: <code>${ramPct.toFixed(1)}%</code>`);
-    if (diskPct > 85)         alerts.push(`▸ Dung lượng ổ cứng sắp đầy: <code>${diskPct.toFixed(1)}%</code>`);
-    if (tempMain > 78)        alerts.push(`▸ Nhiệt độ CPU cao: <code>${tempMain}°C</code>`);
+    const alerts = evaluateAlerts({
+      cpuPct: cpu.currentLoad,
+      ramPct,
+      diskPct: rootD?.use ?? 0,
+      tempC: temps.main || 0,
+    }).filter(a => alertCooldown.ready(a.key)); // moi loai canh bao toi da 1 lan / 30 phut
 
     if (alerts.length > 0) {
       await send(ALLOWED_CHAT,
         `<b>CẢNH BÁO TÀI NGUYÊN HỆ THỐNG</b>\n` +
         `<blockquote>\n` +
-        alerts.join('\n') +
+        alerts.map(a => a.text).join('\n') +
         `\n\n💡 Dùng <code>/top</code> hoặc <code>/status</code> để kiểm tra.` +
         `\n</blockquote>`
       );
