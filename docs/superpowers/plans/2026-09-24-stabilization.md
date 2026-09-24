@@ -308,7 +308,7 @@ Thêm `ALLOWED_CHAT_ID` vào `.env` thật (không phải bí mật; giá trị 
 
 ```bash
 cd /home/dog/homelab-bot
-grep -q '^ALLOWED_CHAT_ID=' .env || printf '\nALLOWED_CHAT_ID=8915208045\n' >> .env
+grep -q '^ALLOWED_CHAT_ID=' .env || printf '\nALLOWED_CHAT_ID=<CHAT_ID>\n' >> .env
 sed 's/=.*/=<redacted>/' .env
 ```
 Expected: danh sách khoá có thêm `ALLOWED_CHAT_ID=<redacted>`.
@@ -562,7 +562,7 @@ Cũ (dòng 12-30):
 const { sendMorningReport, getETFPrice, getWeather, getRSS } = require('./morning');
 ...
 const TOKEN         = process.env.TELEGRAM_BOT_TOKEN;
-const ALLOWED_CHAT  = 8915208045;
+const ALLOWED_CHAT  = <CHAT_ID>;
 const MAC_ADDRESS   = 'F4:B5:20:50:F1:D5';
 const MAIN_PC_IP    = '192.168.1.62';
 const API           = `https://api.telegram.org/bot${TOKEN}`;
@@ -640,7 +640,7 @@ Thay dòng 8-13:
 ```js
 // ─── Config ───────────────────────────────────────────────
 const TOKEN        = process.env.TELEGRAM_BOT_TOKEN;
-const CHAT_ID      = 8915208045;
+const CHAT_ID      = <CHAT_ID>;
 const OWM_KEY      = process.env.OWM_API_KEY;
 const THAI_NGUYEN  = { lat: 21.5942, lon: 105.8412, name: 'Thái Nguyên' };
 const API          = `https://api.telegram.org/bot${TOKEN}`;
