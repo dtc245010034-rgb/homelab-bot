@@ -18,8 +18,10 @@ const { loadConfig } = require('./config');
 const { redact } = require('./lib/redact');
 const { captureSnapshot, CameraError } = require('./lib/camera');
 const { evaluateAlerts, createCooldown } = require('./lib/alerts');
+const { createDetacher } = require('./lib/detach');
 
 const execAsync = util.promisify(exec);
+const run = createDetacher(); // lenh cham chay nen, khong chan vong poll Telegram
 
 // ─── Config ───────────────────────────────────────────────
 const { API, CHAT_ID: ALLOWED_CHAT, CAM_RTSP, CAM_HOST, OWM_KEY } = loadConfig();
@@ -947,21 +949,21 @@ async function processUpdate(update) {
         case 'cmd_ts':       await handleTailscale(chatId, msgId); break;
         case 'cmd_devices':  await handleNetscan(chatId, msgId); break;
         case 'cmd_ip':       await handleIp(chatId, msgId); break;
-        case 'cmd_cleanup':  await handleCleanup(chatId, msgId); break;
+        case 'cmd_cleanup':  run('cleanup', () => handleCleanup(chatId, msgId)); break;
         case 'cmd_ping':     await handlePing(chatId, msgId); break;
         case 'cmd_wol':      await handleWol(chatId, false, msgId); break;
-        case 'cmd_cam':      await handleCam(chatId); break;
+        case 'cmd_cam':      run('cam', () => handleCam(chatId)); break;
         case 'cmd_motion':   await handleMotion(chatId, [], msgId); break;
         case 'motion_on':    await handleMotion(chatId, ['on'], msgId); break;
         case 'motion_off':   await handleMotion(chatId, ['off'], msgId); break;
         case 'cmd_wmap':     await handleWmap(chatId, [], msgId); break;
-        case 'wmap_vn_rain':   await handleWmap(chatId, ['vn', 'rain'], msgId); break;
-        case 'wmap_vn_clouds': await handleWmap(chatId, ['vn', 'clouds'], msgId); break;
-        case 'wmap_vn_wind':   await handleWmap(chatId, ['vn', 'wind'], msgId); break;
-        case 'wmap_tn_rain':   await handleWmap(chatId, ['tn', 'rain'], msgId); break;
-        case 'wmap_tn_temp':   await handleWmap(chatId, ['tn', 'temp'], msgId); break;
+        case 'wmap_vn_rain':   run('wmap', () => handleWmap(chatId, ['vn', 'rain'], msgId)); break;
+        case 'wmap_vn_clouds': run('wmap', () => handleWmap(chatId, ['vn', 'clouds'], msgId)); break;
+        case 'wmap_vn_wind':   run('wmap', () => handleWmap(chatId, ['vn', 'wind'], msgId)); break;
+        case 'wmap_tn_rain':   run('wmap', () => handleWmap(chatId, ['tn', 'rain'], msgId)); break;
+        case 'wmap_tn_temp':   run('wmap', () => handleWmap(chatId, ['tn', 'temp'], msgId)); break;
         case 'cmd_pihole':   await handlePihole(chatId, [], msgId); break;
-        case 'cmd_morning':  await sendMorningReport(); break;
+        case 'cmd_morning':  run('morning', () => sendMorningReport()); break;
         case 'cmd_weekly':   await handleWeekly(chatId, msgId); break;
         case 'cmd_reboot':   await handleReboot(chatId, msgId); break;
         case 'cmd_agentmodel': await agentApi.handleModelPanel(chatId, msgId); break;
@@ -1014,15 +1016,15 @@ async function processUpdate(update) {
       case '/netscan':   await handleNetscan(chatId); break;
       case '/ip':
       case '/speedtest': await handleIp(chatId); break;
-      case '/cleanup':   await handleCleanup(chatId); break;
+      case '/cleanup':   run('cleanup', () => handleCleanup(chatId)); break;
       case '/ping':      await handlePing(chatId); break;
       case '/wol':       await handleWol(chatId, parts[1] === 'force'); break;
-      case '/cam':       await handleCam(chatId); break;
+      case '/cam':       run('cam', () => handleCam(chatId)); break;
       case '/motion':    await handleMotion(chatId, parts.slice(1)); break;
       case '/pihole':    await handlePihole(chatId, parts.slice(1)); break;
-      case '/morning':   await sendMorningReport(); break;
+      case '/morning':   run('morning', () => sendMorningReport()); break;
       case '/weekly':    await handleWeekly(chatId); break;
-      case '/wmap':      await handleWmap(chatId, parts.slice(1)); break;
+      case '/wmap':      run('wmap', () => handleWmap(chatId, parts.slice(1))); break;
       case '/reboot':    await handleReboot(chatId); break;
       case '/agent': {
         const args = parts.slice(1).join(' ');
