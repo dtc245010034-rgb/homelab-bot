@@ -27,8 +27,13 @@ Sửa các lỗi đang làm bot chạy sai/không an toàn, thêm unit test cho 
 
 - **Router**: DHCP reservation cho camera/server, trỏ DNS về Pi-hole (user tự làm sau khi xong các giai đoạn). Trong lúc chờ, mục "PI-HOLE 7 NGÀY" của báo cáo tuần vẫn hiển thị số liệu chưa có ý nghĩa — cần quyết định bỏ hay giữ sau khi có DNS.
 - **Tách `bot.js` (1089 dòng) thành module**: chỉ làm sau khi có test bao phủ; chưa đáng công lúc này.
-- `dailyScheduleDigest` đang chạy 00:01 — chưa rõ có phải ý định (chờ user trả lời), không đổi.
-- Giám sát chuyển động hiện **TẮT** (`.motion-state` không tồn tại) — không tự bật.
+- Giám sát chuyển động hiện **TẮT** (`.motion-state` không tồn tại) — user tự bật sau, không tự bật.
+
+## Quyết định của user (2026-09-24)
+
+- `dailyScheduleDigest` chuyển từ 00:01 sang **06:30**. Vì `scheduler.start()` cũ chỉ "thêm nếu thiếu", job đã có trong `jobs.json` sẽ không đổi giờ → thêm `reconcileSeeds` (hàm thuần, có test) để cập nhật lịch của seed đã tồn tại.
+- Mật khẩu camera: user tự đổi sau; không nhắc lại.
+- Thực thi inline (không subagent).
 - MAC/IP LAN hardcode trong `bot.js` — độ nhạy cảm thấp, để dành khi open-source repo.
 - Quota Gemini free tier (~20 req/ngày/model) — theo dõi, không đổi kiến trúc.
 

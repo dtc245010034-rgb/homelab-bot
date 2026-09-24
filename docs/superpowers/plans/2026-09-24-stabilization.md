@@ -987,6 +987,8 @@ git commit -m "fix: motion-check bao khi camera mat/nhan ket noi, so sanh tren s
 
 ### Task 6: Báo cáo tuần vào `scheduler.js`, xoá nguồn tiến trình thừa
 
+> **Cập nhật khi thực thi (user quyết định):** `dailyScheduleDigest` đổi sang **06:30**. Vì `start()` cũ chỉ thêm seed còn thiếu, task này thêm hàm thuần `reconcileSeeds(jobs, seeds, now)` (test trong `test/scheduler.test.js`, 13 test) để cập nhật cả lịch của job seed đã tồn tại; `start()` gọi hàm này thay cho vòng lặp cũ. `SYSTEM_SEEDS` xuất kèm `reconcileSeeds`.
+
 **Files:**
 - Modify: `scheduler.js` (dòng 93-99 và `module.exports`), `bot.js` (`systemActions`, `handleWeekly`, dòng cuối)
 - Delete: `weekly.js`, `test-rss.js`

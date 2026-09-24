@@ -773,8 +773,8 @@ async function handleWeekly(chatId, msgId = null) {
       `<b>TỔNG KẾT HOMELAB TRONG TUẦN</b>\n` +
       `<blockquote>` +
       `▸ <b>Uptime:</b> <code>${formatUptime(time.uptime)}</code>\n` +
-      `▸ <b>CPU TB:</b> <code>${cpu.currentLoad.toFixed(1)}%</code>\n` +
-      `▸ <b>RAM TB:</b> <code>${ramPct.toFixed(1)}%</code>\n` +
+      `▸ <b>CPU lúc này:</b> <code>${cpu.currentLoad.toFixed(1)}%</code>\n` +
+      `▸ <b>RAM lúc này:</b> <code>${ramPct.toFixed(1)}%</code>\n` +
       `▸ <b>Ổ cứng SSD:</b> <code>${diskPct.toFixed(1)}%</code> (${(rootD.used/1024**3).toFixed(1)} / ${(rootD.size/1024**3).toFixed(1)} GB)` +
       `</blockquote>` +
       etfLine +
@@ -890,6 +890,7 @@ async function handleHelp(chatId, msgId = null) {
 
 const systemActions = {
   archiveAndResetWeek: () => schedule.archiveAndResetWeek(),
+  weeklyReport: () => handleWeekly(ALLOWED_CHAT),
   dailyScheduleDigest: async () => {
     const text = await schedule.getTodayDigestText();
     if (text) await send(ALLOWED_CHAT, `<b>LỊCH HÔM NAY</b>\n<blockquote>${text}</blockquote>`);
@@ -1087,4 +1088,3 @@ async function poll() {
 }
 
 poll();
-module.exports = { handleWeekly };
