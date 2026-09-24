@@ -14,20 +14,19 @@ const { generateWeatherMap } = require('./wmap');
 const { createAgent, getCurrentModel } = require('./agent');
 const { createScheduler } = require('./scheduler');
 const schedule = require('./schedule');
+const { loadConfig } = require('./config');
+const { redact } = require('./lib/redact');
+const { captureSnapshot, CameraError } = require('./lib/camera');
 
 const execAsync = util.promisify(exec);
 
 // ─── Config ───────────────────────────────────────────────
-const TOKEN         = process.env.TELEGRAM_BOT_TOKEN;
-const ALLOWED_CHAT  = 8915208045;
+const { API, CHAT_ID: ALLOWED_CHAT, CAM_RTSP, CAM_HOST, OWM_KEY } = loadConfig();
 const MAC_ADDRESS   = 'F4:B5:20:50:F1:D5';
 const MAIN_PC_IP    = '192.168.1.62';
-const API           = `https://api.telegram.org/bot${TOKEN}`;
 const PIHOLE_SECRET = path.join(os.homedir(), 'homelab-bot', '.pihole-secret');
 const MOTION_STATE  = path.join(__dirname, '.motion-state');
-const CAM_RTSP      = process.env.CAM_RTSP_URL;
 const CAM_SNAP      = '/tmp/cam_snap.jpg';
-const OWM_KEY       = process.env.OWM_API_KEY;
 
 // ─── State ────────────────────────────────────────────────
 let lastUpdateId         = 0;
@@ -39,7 +38,7 @@ let lastAlertCheck       = 0;
 async function render(chatId, text, buttons = null, messageId = null) {
   const payload = {
     chat_id: chatId,
-    text,
+    text: redact(text),
     parse_mode: 'HTML',
     disable_web_page_preview: true,
     reply_markup: buttons ? { inline_keyboard: buttons } : undefined
@@ -363,7 +362,7 @@ async function handleNetscan(chatId, msgId = null) {
       '192.168.1.1': 'Router / Gateway',
       '192.168.1.2': 'Server (Self)',
       '192.168.1.62': 'PC Chính',
-      '192.168.1.68': 'Hikvision Camera'
+      ...(CAM_HOST ? { [CAM_HOST]: 'Hikvision Camera' } : {}),
     };
 
     const deviceList = validLines.map(line => {
@@ -586,8 +585,8 @@ async function handleMotion(chatId, args = [], msgId = null) {
 // ─── /cam ─────────────────────────────────────────────────
 async function handleCam(chatId) {
   try {
-    await execAsync(`ffmpeg -y -rtsp_transport tcp -i "${CAM_RTSP}" -vframes 1 ${CAM_SNAP} 2>/dev/null`);
-    if (!fs.existsSync(CAM_SNAP)) throw new Error('Không tạo được ảnh chụp camera');
+    if (!CAM_RTSP) throw new CameraError('Chưa cấu hình CAM_RTSP_URL trong .env');
+    await captureSnapshot(CAM_RTSP, CAM_SNAP);
 
     const form = new FormData();
     form.append('chat_id', chatId);
@@ -595,7 +594,9 @@ async function handleCam(chatId) {
     form.append('caption', `📷 Camera Snapshot — ${new Date().toLocaleString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh' })}`);
     await axios.post(`${API}/sendPhoto`, form, { headers: form.getHeaders(), timeout: 15000 });
   } catch (e) {
-    await send(chatId, `<b>LỖI CAMERA</b>\n<blockquote><code>${e.message}</code></blockquote>`);
+    console.error('[cam error]', redact(e.detail || e.message));
+    const shown = e instanceof CameraError ? e.message : redact(e.message);
+    await send(chatId, `<b>LỖI CAMERA</b>\n<blockquote><code>${shown}</code></blockquote>`);
   }
 }
 

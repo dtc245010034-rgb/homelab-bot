@@ -6,11 +6,8 @@ const FormData = require('form-data');
 const { generateWeatherMap } = require('./wmap');
 
 // ─── Config ───────────────────────────────────────────────
-const TOKEN        = process.env.TELEGRAM_BOT_TOKEN;
-const CHAT_ID      = 8915208045;
-const OWM_KEY      = process.env.OWM_API_KEY;
+const { CHAT_ID, OWM_KEY, API } = require('./config').loadConfig();
 const THAI_NGUYEN  = { lat: 21.5942, lon: 105.8412, name: 'Thái Nguyên' };
-const API          = `https://api.telegram.org/bot${TOKEN}`;
 
 // ─── RSS Sources ──────────────────────────────────────────
 const RSS_FEEDS = [
