@@ -10,6 +10,7 @@ const os = require('os');
 const https = require('https');
 const { execFile } = require('child_process');
 const { promisify } = require('util');
+const { redact } = require('./lib/redact');
 
 const execFileP = promisify(execFile);
 const CONVERT_TIMEOUT_MS = 30_000;
@@ -17,6 +18,13 @@ const CONVERT_TIMEOUT_MS = 30_000;
 function convert(args) {
   return execFileP('convert', args, { timeout: CONVERT_TIMEOUT_MS });
 }
+
+const ESRI = 'https://server.arcgisonline.com/ArcGIS/rest/services/Canvas';
+const FONT = 'DejaVu-Sans'; // co day du dau tieng Viet (font mac dinh cua ImageMagick thi khong)
+
+// Esri dung thu tu {z}/{y}/{x}. Carto 'light_all' da yeu cau API key (tra tile watermark) nen khong dung nua.
+function baseTileUrl(z, x, y) { return `${ESRI}/World_Light_Gray_Base/MapServer/tile/${z}/${y}/${x}`; }
+function labelTileUrl(z, x, y) { return `${ESRI}/World_Light_Gray_Reference/MapServer/tile/${z}/${y}/${x}`; }
 
 function compositeArgs(base, overlay, out) {
   return [base, overlay, '-compose', 'dissolve', '-define', 'compose:args=65', '-composite', out];
@@ -28,13 +36,14 @@ function appendArgs(files, direction, out) {
 
 function finalArgs(grid, mx, my, caption, out) {
   return [
-    grid,
+    grid, '+repage',
     '-fill', 'red', '-stroke', 'white', '-strokewidth', '1',
     '-draw', `circle ${mx},${my} ${mx + 6},${my}`,
+    '-font', FONT,
     '-gravity', 'NorthEast', '-pointsize', '13', '-stroke', 'none', '-fill', 'white',
     '-undercolor', '#00000090', '-annotate', '+6+6', ' Dog.Bot ',
-    '-gravity', 'South', '-background', '#00000090', '-splice', '0x32',
-    '-pointsize', '15', '-fill', 'white', '-annotate', '+0+9', caption,
+    '-gravity', 'South', '-background', '#00000090', '-splice', '0x32', '+repage',
+    '-pointsize', '15', '-fill', 'white', '-undercolor', 'none', '-annotate', '+0+9', caption,
     out,
   ];
 }
@@ -71,25 +80,38 @@ function latLonToPixel(lat, lon, z) {
   return { x, y };
 }
 
-function download(url, dest) {
+const DOWNLOAD_TIMEOUT_MS = 10_000;
+
+function downloadOnce(url, dest) {
   return new Promise((resolve, reject) => {
     const file = fs.createWriteStream(dest);
-    https
-      .get(url, (res) => {
-        if (res.statusCode !== 200) {
-          file.close();
-          fs.unlink(dest, () => {});
-          reject(new Error(`HTTP ${res.statusCode} for ${url}`));
-          return;
-        }
-        res.pipe(file);
-        file.on('finish', () => file.close(resolve));
-      })
-      .on('error', (err) => {
-        fs.unlink(dest, () => {});
-        reject(err);
-      });
+    const fail = (err) => {
+      file.destroy();
+      fs.unlink(dest, () => {});
+      reject(err);
+    };
+    const req = https.get(url, { timeout: DOWNLOAD_TIMEOUT_MS }, (res) => {
+      if (res.statusCode !== 200) {
+        res.resume();
+        return fail(new Error(`HTTP ${res.statusCode} for ${redact(url)}`));
+      }
+      res.pipe(file);
+      res.on('error', fail);
+      file.on('finish', () => file.close(resolve));
+    });
+    req.on('timeout', () => req.destroy(new Error(`timeout ${DOWNLOAD_TIMEOUT_MS}ms for ${redact(url)}`)));
+    req.on('error', fail);
   });
+}
+
+// Thu lai 1 lan: tile server thinh thoang treo mot tile le.
+async function download(url, dest, retries = 1) {
+  try {
+    return await downloadOnce(url, dest);
+  } catch (e) {
+    if (retries > 0 && !/HTTP 4\d\d/.test(e.message)) return download(url, dest, retries - 1);
+    throw e;
+  }
 }
 
 async function buildTileGrid(x1, x2, y1, y2, zoom, layerCode, tmpDir, apiKey) {
@@ -97,10 +119,11 @@ async function buildTileGrid(x1, x2, y1, y2, zoom, layerCode, tmpDir, apiKey) {
   for (let y = y1; y <= y2; y++) {
     const rowTiles = [];
     for (let x = x1; x <= x2; x++) {
-      const baseFile = path.join(tmpDir, `base_${x}_${y}.png`);
+      const baseFile = path.join(tmpDir, `base_${x}_${y}.jpg`);
+      const labelFile = path.join(tmpDir, `lb_${x}_${y}.png`);
       const overlayFile = path.join(tmpDir, `ov_${x}_${y}.png`);
       const outFile = path.join(tmpDir, `tile_${x}_${y}.png`);
-      const baseUrl = `https://basemaps.cartocdn.com/light_all/${zoom}/${x}/${y}.png`;
+      const baseUrl = baseTileUrl(zoom, x, y);
       const overlayUrl = `https://tile.openweathermap.org/map/${layerCode}/${zoom}/${x}/${y}.png?appid=${apiKey}`;
 
       await download(baseUrl, baseFile);
@@ -115,8 +138,13 @@ async function buildTileGrid(x1, x2, y1, y2, zoom, layerCode, tmpDir, apiKey) {
       if (hasOverlay) {
         await convert(compositeArgs(baseFile, overlayFile, outFile));
       } else {
-        fs.copyFileSync(baseFile, outFile);
+        await convert([baseFile, outFile]);
       }
+
+      try { // ten dia danh phu len tren cung; thieu thi van ra ban do
+        await download(labelTileUrl(zoom, x, y), labelFile);
+        await convert([outFile, labelFile, '-composite', outFile]);
+      } catch (e) { /* bo qua lop chu */ }
       rowTiles.push(outFile);
     }
     const rowFile = path.join(tmpDir, `row_${y}.png`);
@@ -186,4 +214,4 @@ async function generateWeatherMap(presetKey = 'vn', layerKey = 'rain', apiKey) {
   }
 }
 
-module.exports = { generateWeatherMap, PRESETS, LAYERS, compositeArgs, appendArgs, finalArgs, convert };
+module.exports = { generateWeatherMap, PRESETS, LAYERS, baseTileUrl, labelTileUrl, compositeArgs, appendArgs, finalArgs, convert };
