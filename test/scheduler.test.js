@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { computeNextFireAt, SYSTEM_SEEDS, reconcileSeeds } = require('../scheduler');
+const { computeNextFireAt, SYSTEM_SEEDS, reconcileSeeds, pruneJobs } = require('../scheduler');
 
 const at = (y, m, d, h, mi) => new Date(y, m - 1, d, h, mi, 0, 0); // gio local, khong phu thuoc TZ may
 
@@ -88,4 +88,30 @@ test('reconcileSeeds: khong sua mang dau vao', () => {
   reconcileSeeds(existing, [seedA], NOW);
   assert.equal(existing[0].nextFireAt, 'cu');
   assert.equal(existing[0].schedule.hour, 0);
+});
+
+const old = (id, over = {}) => ({ id, type: 'message', schedule: { kind: 'once', atISO: '2026-09-01T06:00:00+07:00' }, active: false, ...over });
+
+test('pruneJobs: xoa job once da tat va qua han hon 7 ngay', () => {
+  const { jobs, removed } = pruneJobs([old('a')], NOW);
+  assert.equal(removed, 1);
+  assert.equal(jobs.length, 0);
+});
+
+test('pruneJobs: giu job con active, job system, job recurring, va job once moi het han', () => {
+  const keep = [
+    old('act', { active: true }),
+    old('sys', { type: 'system' }),
+    old('rec', { schedule: { kind: 'weekly', dayOfWeek: 1, hour: 8, minute: 0 } }),
+    old('recent', { schedule: { kind: 'once', atISO: NOW.toISOString() } }),
+  ];
+  const { jobs, removed } = pruneJobs(keep, NOW);
+  assert.equal(removed, 0);
+  assert.equal(jobs.length, 4);
+});
+
+test('pruneJobs: khong sua mang dau vao', () => {
+  const input = [old('a'), old('b', { active: true })];
+  pruneJobs(input, NOW);
+  assert.equal(input.length, 2);
 });

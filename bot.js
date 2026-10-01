@@ -15,7 +15,7 @@ const { createAgent, getCurrentModel } = require('./agent');
 const { createScheduler } = require('./scheduler');
 const schedule = require('./schedule');
 const { loadConfig } = require('./config');
-const { redact } = require('./lib/redact');
+const { redact, safeError } = require('./lib/redact');
 const { captureSnapshot, CameraError } = require('./lib/camera');
 const { evaluateAlerts, createCooldown } = require('./lib/alerts');
 const { createDetacher } = require('./lib/detach');
@@ -61,7 +61,7 @@ async function render(chatId, text, buttons = null, messageId = null) {
     const { data } = await axios.post(`${API}/sendMessage`, payload, { timeout: 10000 });
     return data?.result?.message_id;
   } catch (e) {
-    console.error('[render error]', e.message);
+    console.error('[render error]', redact(e.message));
   }
 }
 
@@ -78,13 +78,13 @@ async function answerCb(id, text = '') {
 async function pinMessage(chatId, messageId) {
   try {
     await axios.post(`${API}/pinChatMessage`, { chat_id: chatId, message_id: messageId, disable_notification: true }, { timeout: 8000 });
-  } catch (e) { console.error('[pinMessage error]', e.message); }
+  } catch (e) { console.error('[pinMessage error]', redact(e.message)); }
 }
 
 async function unpinMessage(chatId, messageId) {
   try {
     await axios.post(`${API}/unpinChatMessage`, { chat_id: chatId, message_id: messageId }, { timeout: 8000 });
-  } catch (e) { console.error('[unpinMessage error]', e.message); }
+  } catch (e) { console.error('[unpinMessage error]', redact(e.message)); }
 }
 
 async function sendDocument(chatId, filePath, caption) {
@@ -169,7 +169,7 @@ async function checkAlerts() {
       );
     }
   } catch (e) {
-    console.error('[alert error]', e.message);
+    console.error('[alert error]', redact(e.message));
   }
 }
 
@@ -233,7 +233,7 @@ async function handleStatus(chatId, msgId = null) {
     ];
     await render(chatId, text, buttons, msgId);
   } catch (e) {
-    await render(chatId, `<b>LỖI KIỂM TRA STATUS</b>\n<blockquote><code>${e.message}</code></blockquote>`, null, msgId);
+    await render(chatId, `<b>LỖI KIỂM TRA STATUS</b>\n<blockquote><code>${safeError(e)}</code></blockquote>`, null, msgId);
   }
 }
 
@@ -256,7 +256,7 @@ async function handleTop(chatId, msgId = null) {
     ];
     await render(chatId, text, buttons, msgId);
   } catch (e) {
-    await render(chatId, `<b>LỖI KIỂM TRA TOP</b>\n<blockquote><code>${e.message}</code></blockquote>`, null, msgId);
+    await render(chatId, `<b>LỖI KIỂM TRA TOP</b>\n<blockquote><code>${safeError(e)}</code></blockquote>`, null, msgId);
   }
 }
 
@@ -285,7 +285,7 @@ async function handleTemp(chatId, msgId = null) {
     ];
     await render(chatId, text, buttons, msgId);
   } catch (e) {
-    await render(chatId, `<b>LỖI ĐỌC NHIỆT ĐỘ</b>\n<blockquote><code>${e.message}</code></blockquote>`, null, msgId);
+    await render(chatId, `<b>LỖI ĐỌC NHIỆT ĐỘ</b>\n<blockquote><code>${safeError(e)}</code></blockquote>`, null, msgId);
   }
 }
 
@@ -318,7 +318,7 @@ async function handleServices(chatId, msgId = null) {
     ];
     await render(chatId, text, buttons, msgId);
   } catch (e) {
-    await render(chatId, `<b>LỖI KIỂM TRA PM2</b>\n<blockquote><code>${e.message}</code></blockquote>`, null, msgId);
+    await render(chatId, `<b>LỖI KIỂM TRA PM2</b>\n<blockquote><code>${safeError(e)}</code></blockquote>`, null, msgId);
   }
 }
 
@@ -351,7 +351,7 @@ async function handleTailscale(chatId, msgId = null) {
     ];
     await render(chatId, text, buttons, msgId);
   } catch (e) {
-    await render(chatId, `<b>LỖI TAILSCALE</b>\n<blockquote><code>${e.message}</code></blockquote>`, null, msgId);
+    await render(chatId, `<b>LỖI TAILSCALE</b>\n<blockquote><code>${safeError(e)}</code></blockquote>`, null, msgId);
   }
 }
 
@@ -393,7 +393,7 @@ async function handleNetscan(chatId, msgId = null) {
     ];
     await render(chatId, text, buttons, msgId);
   } catch (e) {
-    await render(chatId, `<b>LỖI QUÉT MẠNG LAN</b>\n<blockquote><code>${e.message}</code></blockquote>`, null, msgId);
+    await render(chatId, `<b>LỖI QUÉT MẠNG LAN</b>\n<blockquote><code>${safeError(e)}</code></blockquote>`, null, msgId);
   }
 }
 
@@ -433,7 +433,7 @@ async function handleIp(chatId, msgId = null) {
     ];
     await render(chatId, text, buttons, msgId);
   } catch (e) {
-    await render(chatId, `<b>LỖI CHẨN ĐOÁN MẠNG</b>\n<blockquote><code>${e.message}</code></blockquote>`, null, msgId);
+    await render(chatId, `<b>LỖI CHẨN ĐOÁN MẠNG</b>\n<blockquote><code>${safeError(e)}</code></blockquote>`, null, msgId);
   }
 }
 
@@ -483,7 +483,7 @@ async function handleCleanup(chatId, msgId = null) {
     ];
     await render(chatId, text, buttons, msgId);
   } catch (e) {
-    await render(chatId, `<b>LỖI DỌN DẸP</b>\n<blockquote><code>${e.message}</code></blockquote>`, null, msgId);
+    await render(chatId, `<b>LỖI DỌN DẸP</b>\n<blockquote><code>${safeError(e)}</code></blockquote>`, null, msgId);
   }
 }
 
@@ -515,7 +515,7 @@ async function handlePing(chatId, msgId = null) {
 
     await render(chatId, text, buttons, msgId);
   } catch (e) {
-    await render(chatId, `<b>LỖI PING MÁY CHÍNH</b>\n<blockquote><code>${e.message}</code></blockquote>`, null, msgId);
+    await render(chatId, `<b>LỖI PING MÁY CHÍNH</b>\n<blockquote><code>${safeError(e)}</code></blockquote>`, null, msgId);
   }
 }
 
@@ -550,7 +550,7 @@ async function handleWol(chatId, force = false, msgId = null) {
     ];
     await render(chatId, text, buttons, msgId);
   } catch (e) {
-    await render(chatId, `<b>LỖI WAKE-ON-LAN</b>\n<blockquote><code>${e.message}</code></blockquote>`, null, msgId);
+    await render(chatId, `<b>LỖI WAKE-ON-LAN</b>\n<blockquote><code>${safeError(e)}</code></blockquote>`, null, msgId);
   }
 }
 
@@ -599,7 +599,7 @@ async function handleCam(chatId) {
     await axios.post(`${API}/sendPhoto`, form, { headers: form.getHeaders(), timeout: 15000 });
   } catch (e) {
     console.error('[cam error]', redact(e.detail || e.message));
-    const shown = e instanceof CameraError ? e.message : redact(e.message);
+    const shown = safeError(e);
     await send(chatId, `<b>LỖI CAMERA</b>\n<blockquote><code>${shown}</code></blockquote>`);
   }
 }
@@ -647,8 +647,8 @@ async function handleWmap(chatId, args = [], msgId = null) {
     await axios.post(`${API}/sendPhoto`, form, { headers: form.getHeaders(), timeout: 30000 });
     try { fs.unlinkSync(filePath); } catch {}
   } catch (e) {
-    console.error('[wmap error]', e.message);
-    await send(chatId, `<b>LỖI BẢN ĐỒ THỜI TIẾT</b>\n<blockquote><code>${e.message}</code></blockquote>`);
+    console.error('[wmap error]', redact(e.message));
+    await send(chatId, `<b>LỖI BẢN ĐỒ THỜI TIẾT</b>\n<blockquote><code>${safeError(e)}</code></blockquote>`);
   }
 }
 
@@ -717,7 +717,7 @@ async function handlePihole(chatId, args = [], msgId = null) {
       await render(chatId, '<b>CÚ PHÁP PI-HOLE</b>\n<blockquote>Dùng: <code>/pihole | /pihole on | /pihole off [phút]</code></blockquote>', null, msgId);
     }
   } catch (e) {
-    await render(chatId, `<b>LỖI PI-HOLE</b>\n<blockquote><code>${e.message}</code></blockquote>`, null, msgId);
+    await render(chatId, `<b>LỖI PI-HOLE</b>\n<blockquote><code>${safeError(e)}</code></blockquote>`, null, msgId);
   }
 }
 
@@ -788,7 +788,7 @@ async function handleWeekly(chatId, msgId = null) {
     const buttons = [[{ text: '◀ Menu chính', callback_data: 'cmd_help' }]];
     await render(chatId, text, buttons, msgId);
   } catch (e) {
-    await render(chatId, `<b>LỖI TỔNG KẾT TUẦN</b>\n<blockquote><code>${e.message}</code></blockquote>`, null, msgId);
+    await render(chatId, `<b>LỖI TỔNG KẾT TUẦN</b>\n<blockquote><code>${safeError(e)}</code></blockquote>`, null, msgId);
   }
 }
 
@@ -1028,7 +1028,7 @@ async function processUpdate(update) {
       case '/reboot':    await handleReboot(chatId); break;
       case '/agent': {
         const args = parts.slice(1).join(' ');
-        agentApi.handleAgent(chatId, args).catch(e => console.error('[agent error]', e.message));
+        agentApi.handleAgent(chatId, args).catch(e => console.error('[agent error]', redact(e.message)));
         break;
       }
       case '/new':
@@ -1055,7 +1055,7 @@ async function poll() {
       console.log(`[poll] Initialized offset to ${lastUpdateId}`);
     }
   } catch (e) {
-    console.error('[poll init error]', e.message);
+    console.error('[poll init error]', redact(e.message));
   }
 
   await send(ALLOWED_CHAT,
@@ -1084,7 +1084,7 @@ async function poll() {
       }
     } catch (e) {
       if (!e.message?.includes('timeout')) {
-        console.error('[poll loop error]', e.message);
+        console.error('[poll loop error]', redact(e.message));
       }
       await new Promise(r => setTimeout(r, 2000));
     }

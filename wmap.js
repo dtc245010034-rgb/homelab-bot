@@ -8,7 +8,36 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 const https = require('https');
-const { execSync } = require('child_process');
+const { execFile } = require('child_process');
+const { promisify } = require('util');
+
+const execFileP = promisify(execFile);
+const CONVERT_TIMEOUT_MS = 30_000;
+
+function convert(args) {
+  return execFileP('convert', args, { timeout: CONVERT_TIMEOUT_MS });
+}
+
+function compositeArgs(base, overlay, out) {
+  return [base, overlay, '-compose', 'dissolve', '-define', 'compose:args=65', '-composite', out];
+}
+
+function appendArgs(files, direction, out) {
+  return [...files, direction, out];
+}
+
+function finalArgs(grid, mx, my, caption, out) {
+  return [
+    grid,
+    '-fill', 'red', '-stroke', 'white', '-strokewidth', '1',
+    '-draw', `circle ${mx},${my} ${mx + 6},${my}`,
+    '-gravity', 'NorthEast', '-pointsize', '13', '-stroke', 'none', '-fill', 'white',
+    '-undercolor', '#00000090', '-annotate', '+6+6', ' Dog.Bot ',
+    '-gravity', 'South', '-background', '#00000090', '-splice', '0x32',
+    '-pointsize', '15', '-fill', 'white', '-annotate', '+0+9', caption,
+    out,
+  ];
+}
 
 const LAYERS = {
   rain: 'precipitation_new',
@@ -84,20 +113,18 @@ async function buildTileGrid(x1, x2, y1, y2, zoom, layerCode, tmpDir, apiKey) {
       }
 
       if (hasOverlay) {
-        execSync(
-          `convert "${baseFile}" "${overlayFile}" -compose dissolve -define compose:args=65 -composite "${outFile}"`
-        );
+        await convert(compositeArgs(baseFile, overlayFile, outFile));
       } else {
         fs.copyFileSync(baseFile, outFile);
       }
       rowTiles.push(outFile);
     }
     const rowFile = path.join(tmpDir, `row_${y}.png`);
-    execSync(`convert ${rowTiles.map((f) => `"${f}"`).join(' ')} +append "${rowFile}"`);
+    await convert(appendArgs(rowTiles, '+append', rowFile));
     rowFiles.push(rowFile);
   }
   const gridFile = path.join(tmpDir, 'grid.png');
-  execSync(`convert ${rowFiles.map((f) => `"${f}"`).join(' ')} -append "${gridFile}"`);
+  await convert(appendArgs(rowFiles, '-append', gridFile));
   return gridFile;
 }
 
@@ -149,13 +176,7 @@ async function generateWeatherMap(presetKey = 'vn', layerKey = 'rain', apiKey) {
       { timeZone: 'Asia/Ho_Chi_Minh' }
     )}`;
     const finalFile = path.join(tmpDir, 'final.png');
-    execSync(
-      `convert "${gridFile}" ` +
-        `-fill red -stroke white -strokewidth 1 -draw "circle ${mx},${my} ${mx + 6},${my}" ` +
-        `-gravity NorthEast -pointsize 13 -stroke none -fill white -undercolor "#00000090" -annotate +6+6 " Dog.Bot " ` +
-        `-gravity South -background "#00000090" -splice 0x32 -pointsize 15 -fill white ` +
-        `-annotate +0+9 "${caption.replace(/"/g, "'")}" "${finalFile}"`
-    );
+    await convert(finalArgs(gridFile, mx, my, caption, finalFile));
 
     const outputFile = path.join(os.tmpdir(), `wmap_${presetKey}_${layerKey}_${Date.now()}.png`);
     fs.copyFileSync(finalFile, outputFile);
@@ -165,4 +186,4 @@ async function generateWeatherMap(presetKey = 'vn', layerKey = 'rain', apiKey) {
   }
 }
 
-module.exports = { generateWeatherMap, PRESETS, LAYERS };
+module.exports = { generateWeatherMap, PRESETS, LAYERS, compositeArgs, appendArgs, finalArgs, convert };
