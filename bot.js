@@ -19,12 +19,13 @@ const { redact, safeError } = require('./lib/redact');
 const { captureSnapshot, CameraError } = require('./lib/camera');
 const { evaluateAlerts, createCooldown } = require('./lib/alerts');
 const { createDetacher } = require('./lib/detach');
+const { parseAgentCaption, pickPhoto, downloadTelegramFile, detectMime } = require('./lib/agent-image');
 
 const execAsync = util.promisify(exec);
 const run = createDetacher(); // lenh cham chay nen, khong chan vong poll Telegram
 
 // ─── Config ───────────────────────────────────────────────
-const { API, CHAT_ID: ALLOWED_CHAT, CAM_RTSP, CAM_HOST, OWM_KEY } = loadConfig();
+const { API, TOKEN, CHAT_ID: ALLOWED_CHAT, CAM_RTSP, CAM_HOST, OWM_KEY } = loadConfig();
 const MAC_ADDRESS   = 'F4:B5:20:50:F1:D5';
 const MAIN_PC_IP    = '192.168.1.62';
 const PIHOLE_SECRET = path.join(os.homedir(), 'homelab-bot', '.pihole-secret');
@@ -881,7 +882,7 @@ async function handleHelp(chatId, msgId = null) {
     `<b>AGENT AI</b>\n` +
     `<blockquote>` +
     `▸ Model đang dùng: <code>${getCurrentModel()}</code>\n` +
-    `▸ <code>/agent &lt;câu hỏi&gt;</code> — Trò chuyện với AI trợ lý\n` +
+    `▸ <code>/agent &lt;câu hỏi&gt;</code> — Trò chuyện với AI trợ lý (gửi kèm ảnh để thêm lịch)\n` +
     `▸ <code>/agent quota</code> — Xem quota Gemini đã dùng ước tính hôm nay\n` +
     `▸ <code>/new</code> hoặc <code>/reset</code> — Bắt đầu phiên hội thoại mới\n` +
     `▸ Lịch tuần: "thêm vào lịch thứ 4 chiều 14h họp nhóm", "xem lịch tuần này", "gửi lại file lịch", "xoá sáng thứ 7" (cần xác nhận), "xoá hết lịch tuần này" (cần xác nhận)\n` +
@@ -920,6 +921,26 @@ const agentApi = createAgent({
   removeScheduleItem: schedule.removeItem,
   weekRangeLabel: schedule.weekRangeLabel,
 });
+
+// ─── Ảnh gửi kèm /agent ────────────────────────────────────
+async function handleAgentPhoto(chatId, agentText, photoSizes) {
+  const photo = pickPhoto(photoSizes);
+  if (!photo) {
+    await send(chatId, '<b>ẢNH QUÁ LỚN</b>\n<blockquote>Ảnh vượt giới hạn 4 MB, hãy gửi ảnh nhỏ hơn.</blockquote>');
+    return;
+  }
+  let image;
+  try {
+    const buf = await downloadTelegramFile(axios, { apiBase: API, fileBase: `https://api.telegram.org/file/bot${TOKEN}` }, photo.file_id);
+    const mimeType = detectMime(buf);
+    if (!mimeType) throw new Error('định dạng ảnh không hỗ trợ');
+    image = { mimeType, data: buf.toString('base64') };
+  } catch (e) {
+    await send(chatId, `<b>KHÔNG TẢI ĐƯỢC ẢNH</b>\n<blockquote><code>${safeError(e)}</code></blockquote>`);
+    return;
+  }
+  agentApi.handleAgent(chatId, agentText, image).catch(e => console.error('[agent error]', redact(e.message)));
+}
 
 // ─── Callback & Message Router ────────────────────────────
 async function processUpdate(update) {
@@ -983,6 +1004,13 @@ async function processUpdate(update) {
       await send(chatId, '<b>TỪ CHỐI TRUY CẬP</b>\n<blockquote>Tài khoản chưa được phân quyền.</blockquote>');
       return;
     }
+    if (!msg.text && msg.photo) {
+      const agentText = parseAgentCaption(msg.caption);
+      if (agentText !== null) {
+        await handleAgentPhoto(chatId, agentText, msg.photo);
+        return;
+      }
+    }
     if (!msg.text) {
       // Telegram cung gui update dang "message" cho cac service message KHONG PHAI do
       // nguoi dung upload (vd: tu ghim/bo ghim tin - pinned_message, doi ten/anh nhom...).
@@ -991,7 +1019,7 @@ async function processUpdate(update) {
       const isUserUpload = msg.photo || msg.document || msg.video || msg.voice ||
         msg.audio || msg.sticker || msg.video_note || msg.animation;
       if (isUserUpload) {
-        await send(chatId, '<b>CHƯA HỖ TRỢ</b>\n<blockquote>Bot chưa hỗ trợ nhận file/ảnh trực tiếp. Dùng <code>/agent &lt;mô tả bằng lời&gt;</code> để nhờ AI xử lý (thêm lịch, đặt nhắc việc...).</blockquote>');
+        await send(chatId, '<b>CHƯA HỖ TRỢ</b>\n<blockquote>Bot chỉ nhận ảnh kèm lời nhắn. Gửi ảnh và ghi chú thích <code>/agent &lt;yêu cầu&gt;</code> (vd: <code>/agent thêm lịch từ ảnh này</code>), hoặc dùng <code>/agent &lt;mô tả bằng lời&gt;</code>.</blockquote>');
       }
       return;
     }
