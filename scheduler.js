@@ -87,6 +87,17 @@ function reconcileSeeds(jobs, seeds, now) {
   return { jobs: out, changed };
 }
 
+// Xoa job 'once' da tat va da qua han hon keepDays ngay (jobs.json khong phinh mai). Ham thuan.
+function pruneJobs(jobs, now, keepDays = 7) {
+  const cutoff = now.getTime() - keepDays * 86400000;
+  const kept = jobs.filter(j => {
+    if (j.active || j.type === 'system' || !j.schedule || j.schedule.kind !== 'once') return true;
+    const at = new Date(j.schedule.atISO).getTime();
+    return !(at < cutoff);
+  });
+  return { jobs: kept, removed: jobs.length - kept.length };
+}
+
 function createScheduler({ send, systemActions, pinMessage, unpinMessage }) {
   async function tick() {
     const now = Date.now();
@@ -96,6 +107,7 @@ function createScheduler({ send, systemActions, pinMessage, unpinMessage }) {
       .sort((a, b) => new Date(a.nextFireAt) - new Date(b.nextFireAt));
 
     for (const job of due) {
+      let ok = false;
       try {
         if (job.type === 'message') {
           const messageId = await send(job.chatId, job.message);
@@ -112,6 +124,8 @@ function createScheduler({ send, systemActions, pinMessage, unpinMessage }) {
           if (fn) await fn(job);
           else console.error(`[scheduler] unknown system action: ${job.action}`);
         }
+        ok = true;
+        console.log(`[scheduler] fired ${job.id} (${job.action || job.type})`);
       } catch (e) {
         console.error(`[scheduler] job ${job.id} (${job.action || job.type}) failed:`, e.message);
       }
@@ -120,6 +134,7 @@ function createScheduler({ send, systemActions, pinMessage, unpinMessage }) {
       const idx = fresh.findIndex(j => j.id === job.id);
       if (idx === -1) continue; // bi cancelJob() xoa dung luc nay - bo qua
 
+      if (ok) fresh[idx].lastFiredAt = new Date().toISOString();
       if (job.schedule.kind === 'once') {
         fresh[idx].active = false;
       } else {
@@ -134,8 +149,11 @@ function createScheduler({ send, systemActions, pinMessage, unpinMessage }) {
     for (const s of SYSTEM_SEEDS) {
       if (!systemActions[s.action]) console.error(`[scheduler] seed "${s.action}" chưa có handler trong systemActions`);
     }
-    const { jobs, changed } = reconcileSeeds(loadJobs(), SYSTEM_SEEDS, new Date());
-    if (changed) saveJobs(jobs);
+    const now = new Date();
+    const reconciled = reconcileSeeds(loadJobs(), SYSTEM_SEEDS, now);
+    const pruned = pruneJobs(reconciled.jobs, now);
+    if (reconciled.changed || pruned.removed) saveJobs(pruned.jobs);
+    if (pruned.removed) console.log(`[scheduler] don ${pruned.removed} job mot lan da het han`);
 
     setInterval(() => {
       tick().catch(e => console.error('[scheduler tick error]', e.message));
@@ -176,4 +194,4 @@ function createScheduler({ send, systemActions, pinMessage, unpinMessage }) {
   return { start, addJob, listJobs, cancelJob, tick };
 }
 
-module.exports = { createScheduler, computeNextFireAt, SYSTEM_SEEDS, reconcileSeeds };
+module.exports = { createScheduler, computeNextFireAt, SYSTEM_SEEDS, reconcileSeeds, pruneJobs };

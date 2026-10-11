@@ -39,3 +39,22 @@ test('null/undefined -> chuoi rong, so -> chuoi', () => {
   assert.equal(redact(undefined), '');
   assert.equal(redact(42), '42');
 });
+
+const { escapeHtml, safeError } = require('../lib/redact');
+
+test('escapeHtml: escape & < >', () => {
+  assert.equal(escapeHtml('a<b>&c'), 'a&lt;b&gt;&amp;c');
+});
+
+test('safeError: che credential va escape HTML trong cung mot lan', () => {
+  const out = safeError(new Error('fail rtsp://admin:p@ss@10.0.0.1/x <b>'));
+  assert.ok(!out.includes('p@ss'));
+  assert.ok(out.includes('rtsp://***@10.0.0.1/x'));
+  assert.ok(out.includes('&lt;b&gt;'));
+});
+
+test('safeError: cat do dai, chap nhan null/chuoi', () => {
+  assert.equal(safeError(new Error('x'.repeat(500)), 10), 'xxxxxxxxxx…');
+  assert.equal(safeError(null), '');
+  assert.equal(safeError('loi chuoi'), 'loi chuoi');
+});

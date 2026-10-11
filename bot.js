@@ -15,16 +15,17 @@ const { createAgent, getCurrentModel } = require('./agent');
 const { createScheduler } = require('./scheduler');
 const schedule = require('./schedule');
 const { loadConfig } = require('./config');
-const { redact } = require('./lib/redact');
+const { redact, safeError } = require('./lib/redact');
 const { captureSnapshot, CameraError } = require('./lib/camera');
 const { evaluateAlerts, createCooldown } = require('./lib/alerts');
 const { createDetacher } = require('./lib/detach');
+const { parseAgentCaption, pickPhoto, downloadTelegramFile, detectMime } = require('./lib/agent-image');
 
 const execAsync = util.promisify(exec);
 const run = createDetacher(); // lenh cham chay nen, khong chan vong poll Telegram
 
 // ─── Config ───────────────────────────────────────────────
-const { API, CHAT_ID: ALLOWED_CHAT, CAM_RTSP, CAM_HOST, OWM_KEY } = loadConfig();
+const { API, TOKEN, CHAT_ID: ALLOWED_CHAT, CAM_RTSP, CAM_HOST, OWM_KEY } = loadConfig();
 const MAC_ADDRESS   = 'F4:B5:20:50:F1:D5';
 const MAIN_PC_IP    = '192.168.1.62';
 const PIHOLE_SECRET = path.join(os.homedir(), 'homelab-bot', '.pihole-secret');
@@ -61,7 +62,7 @@ async function render(chatId, text, buttons = null, messageId = null) {
     const { data } = await axios.post(`${API}/sendMessage`, payload, { timeout: 10000 });
     return data?.result?.message_id;
   } catch (e) {
-    console.error('[render error]', e.message);
+    console.error('[render error]', redact(e.message));
   }
 }
 
@@ -78,13 +79,13 @@ async function answerCb(id, text = '') {
 async function pinMessage(chatId, messageId) {
   try {
     await axios.post(`${API}/pinChatMessage`, { chat_id: chatId, message_id: messageId, disable_notification: true }, { timeout: 8000 });
-  } catch (e) { console.error('[pinMessage error]', e.message); }
+  } catch (e) { console.error('[pinMessage error]', redact(e.message)); }
 }
 
 async function unpinMessage(chatId, messageId) {
   try {
     await axios.post(`${API}/unpinChatMessage`, { chat_id: chatId, message_id: messageId }, { timeout: 8000 });
-  } catch (e) { console.error('[unpinMessage error]', e.message); }
+  } catch (e) { console.error('[unpinMessage error]', redact(e.message)); }
 }
 
 async function sendDocument(chatId, filePath, caption) {
@@ -169,7 +170,7 @@ async function checkAlerts() {
       );
     }
   } catch (e) {
-    console.error('[alert error]', e.message);
+    console.error('[alert error]', redact(e.message));
   }
 }
 
@@ -233,7 +234,7 @@ async function handleStatus(chatId, msgId = null) {
     ];
     await render(chatId, text, buttons, msgId);
   } catch (e) {
-    await render(chatId, `<b>LỖI KIỂM TRA STATUS</b>\n<blockquote><code>${e.message}</code></blockquote>`, null, msgId);
+    await render(chatId, `<b>LỖI KIỂM TRA STATUS</b>\n<blockquote><code>${safeError(e)}</code></blockquote>`, null, msgId);
   }
 }
 
@@ -256,7 +257,7 @@ async function handleTop(chatId, msgId = null) {
     ];
     await render(chatId, text, buttons, msgId);
   } catch (e) {
-    await render(chatId, `<b>LỖI KIỂM TRA TOP</b>\n<blockquote><code>${e.message}</code></blockquote>`, null, msgId);
+    await render(chatId, `<b>LỖI KIỂM TRA TOP</b>\n<blockquote><code>${safeError(e)}</code></blockquote>`, null, msgId);
   }
 }
 
@@ -285,7 +286,7 @@ async function handleTemp(chatId, msgId = null) {
     ];
     await render(chatId, text, buttons, msgId);
   } catch (e) {
-    await render(chatId, `<b>LỖI ĐỌC NHIỆT ĐỘ</b>\n<blockquote><code>${e.message}</code></blockquote>`, null, msgId);
+    await render(chatId, `<b>LỖI ĐỌC NHIỆT ĐỘ</b>\n<blockquote><code>${safeError(e)}</code></blockquote>`, null, msgId);
   }
 }
 
@@ -318,7 +319,7 @@ async function handleServices(chatId, msgId = null) {
     ];
     await render(chatId, text, buttons, msgId);
   } catch (e) {
-    await render(chatId, `<b>LỖI KIỂM TRA PM2</b>\n<blockquote><code>${e.message}</code></blockquote>`, null, msgId);
+    await render(chatId, `<b>LỖI KIỂM TRA PM2</b>\n<blockquote><code>${safeError(e)}</code></blockquote>`, null, msgId);
   }
 }
 
@@ -351,7 +352,7 @@ async function handleTailscale(chatId, msgId = null) {
     ];
     await render(chatId, text, buttons, msgId);
   } catch (e) {
-    await render(chatId, `<b>LỖI TAILSCALE</b>\n<blockquote><code>${e.message}</code></blockquote>`, null, msgId);
+    await render(chatId, `<b>LỖI TAILSCALE</b>\n<blockquote><code>${safeError(e)}</code></blockquote>`, null, msgId);
   }
 }
 
@@ -393,7 +394,7 @@ async function handleNetscan(chatId, msgId = null) {
     ];
     await render(chatId, text, buttons, msgId);
   } catch (e) {
-    await render(chatId, `<b>LỖI QUÉT MẠNG LAN</b>\n<blockquote><code>${e.message}</code></blockquote>`, null, msgId);
+    await render(chatId, `<b>LỖI QUÉT MẠNG LAN</b>\n<blockquote><code>${safeError(e)}</code></blockquote>`, null, msgId);
   }
 }
 
@@ -433,7 +434,7 @@ async function handleIp(chatId, msgId = null) {
     ];
     await render(chatId, text, buttons, msgId);
   } catch (e) {
-    await render(chatId, `<b>LỖI CHẨN ĐOÁN MẠNG</b>\n<blockquote><code>${e.message}</code></blockquote>`, null, msgId);
+    await render(chatId, `<b>LỖI CHẨN ĐOÁN MẠNG</b>\n<blockquote><code>${safeError(e)}</code></blockquote>`, null, msgId);
   }
 }
 
@@ -483,7 +484,7 @@ async function handleCleanup(chatId, msgId = null) {
     ];
     await render(chatId, text, buttons, msgId);
   } catch (e) {
-    await render(chatId, `<b>LỖI DỌN DẸP</b>\n<blockquote><code>${e.message}</code></blockquote>`, null, msgId);
+    await render(chatId, `<b>LỖI DỌN DẸP</b>\n<blockquote><code>${safeError(e)}</code></blockquote>`, null, msgId);
   }
 }
 
@@ -515,7 +516,7 @@ async function handlePing(chatId, msgId = null) {
 
     await render(chatId, text, buttons, msgId);
   } catch (e) {
-    await render(chatId, `<b>LỖI PING MÁY CHÍNH</b>\n<blockquote><code>${e.message}</code></blockquote>`, null, msgId);
+    await render(chatId, `<b>LỖI PING MÁY CHÍNH</b>\n<blockquote><code>${safeError(e)}</code></blockquote>`, null, msgId);
   }
 }
 
@@ -550,7 +551,7 @@ async function handleWol(chatId, force = false, msgId = null) {
     ];
     await render(chatId, text, buttons, msgId);
   } catch (e) {
-    await render(chatId, `<b>LỖI WAKE-ON-LAN</b>\n<blockquote><code>${e.message}</code></blockquote>`, null, msgId);
+    await render(chatId, `<b>LỖI WAKE-ON-LAN</b>\n<blockquote><code>${safeError(e)}</code></blockquote>`, null, msgId);
   }
 }
 
@@ -599,7 +600,7 @@ async function handleCam(chatId) {
     await axios.post(`${API}/sendPhoto`, form, { headers: form.getHeaders(), timeout: 15000 });
   } catch (e) {
     console.error('[cam error]', redact(e.detail || e.message));
-    const shown = e instanceof CameraError ? e.message : redact(e.message);
+    const shown = safeError(e);
     await send(chatId, `<b>LỖI CAMERA</b>\n<blockquote><code>${shown}</code></blockquote>`);
   }
 }
@@ -647,8 +648,8 @@ async function handleWmap(chatId, args = [], msgId = null) {
     await axios.post(`${API}/sendPhoto`, form, { headers: form.getHeaders(), timeout: 30000 });
     try { fs.unlinkSync(filePath); } catch {}
   } catch (e) {
-    console.error('[wmap error]', e.message);
-    await send(chatId, `<b>LỖI BẢN ĐỒ THỜI TIẾT</b>\n<blockquote><code>${e.message}</code></blockquote>`);
+    console.error('[wmap error]', redact(e.message));
+    await send(chatId, `<b>LỖI BẢN ĐỒ THỜI TIẾT</b>\n<blockquote><code>${safeError(e)}</code></blockquote>`);
   }
 }
 
@@ -717,7 +718,7 @@ async function handlePihole(chatId, args = [], msgId = null) {
       await render(chatId, '<b>CÚ PHÁP PI-HOLE</b>\n<blockquote>Dùng: <code>/pihole | /pihole on | /pihole off [phút]</code></blockquote>', null, msgId);
     }
   } catch (e) {
-    await render(chatId, `<b>LỖI PI-HOLE</b>\n<blockquote><code>${e.message}</code></blockquote>`, null, msgId);
+    await render(chatId, `<b>LỖI PI-HOLE</b>\n<blockquote><code>${safeError(e)}</code></blockquote>`, null, msgId);
   }
 }
 
@@ -788,7 +789,7 @@ async function handleWeekly(chatId, msgId = null) {
     const buttons = [[{ text: '◀ Menu chính', callback_data: 'cmd_help' }]];
     await render(chatId, text, buttons, msgId);
   } catch (e) {
-    await render(chatId, `<b>LỖI TỔNG KẾT TUẦN</b>\n<blockquote><code>${e.message}</code></blockquote>`, null, msgId);
+    await render(chatId, `<b>LỖI TỔNG KẾT TUẦN</b>\n<blockquote><code>${safeError(e)}</code></blockquote>`, null, msgId);
   }
 }
 
@@ -881,7 +882,7 @@ async function handleHelp(chatId, msgId = null) {
     `<b>AGENT AI</b>\n` +
     `<blockquote>` +
     `▸ Model đang dùng: <code>${getCurrentModel()}</code>\n` +
-    `▸ <code>/agent &lt;câu hỏi&gt;</code> — Trò chuyện với AI trợ lý\n` +
+    `▸ <code>/agent &lt;câu hỏi&gt;</code> — Trò chuyện với AI trợ lý (gửi kèm ảnh để thêm lịch)\n` +
     `▸ <code>/agent quota</code> — Xem quota Gemini đã dùng ước tính hôm nay\n` +
     `▸ <code>/new</code> hoặc <code>/reset</code> — Bắt đầu phiên hội thoại mới\n` +
     `▸ Lịch tuần: "thêm vào lịch thứ 4 chiều 14h họp nhóm", "xem lịch tuần này", "gửi lại file lịch", "xoá sáng thứ 7" (cần xác nhận), "xoá hết lịch tuần này" (cần xác nhận)\n` +
@@ -920,6 +921,26 @@ const agentApi = createAgent({
   removeScheduleItem: schedule.removeItem,
   weekRangeLabel: schedule.weekRangeLabel,
 });
+
+// ─── Ảnh gửi kèm /agent ────────────────────────────────────
+async function handleAgentPhoto(chatId, agentText, photoSizes) {
+  const photo = pickPhoto(photoSizes);
+  if (!photo) {
+    await send(chatId, '<b>ẢNH QUÁ LỚN</b>\n<blockquote>Ảnh vượt giới hạn 4 MB, hãy gửi ảnh nhỏ hơn.</blockquote>');
+    return;
+  }
+  let image;
+  try {
+    const buf = await downloadTelegramFile(axios, { apiBase: API, fileBase: `https://api.telegram.org/file/bot${TOKEN}` }, photo.file_id);
+    const mimeType = detectMime(buf);
+    if (!mimeType) throw new Error('định dạng ảnh không hỗ trợ');
+    image = { mimeType, data: buf.toString('base64') };
+  } catch (e) {
+    await send(chatId, `<b>KHÔNG TẢI ĐƯỢC ẢNH</b>\n<blockquote><code>${safeError(e)}</code></blockquote>`);
+    return;
+  }
+  agentApi.handleAgent(chatId, agentText, image).catch(e => console.error('[agent error]', redact(e.message)));
+}
 
 // ─── Callback & Message Router ────────────────────────────
 async function processUpdate(update) {
@@ -983,6 +1004,13 @@ async function processUpdate(update) {
       await send(chatId, '<b>TỪ CHỐI TRUY CẬP</b>\n<blockquote>Tài khoản chưa được phân quyền.</blockquote>');
       return;
     }
+    if (!msg.text && msg.photo) {
+      const agentText = parseAgentCaption(msg.caption);
+      if (agentText !== null) {
+        await handleAgentPhoto(chatId, agentText, msg.photo);
+        return;
+      }
+    }
     if (!msg.text) {
       // Telegram cung gui update dang "message" cho cac service message KHONG PHAI do
       // nguoi dung upload (vd: tu ghim/bo ghim tin - pinned_message, doi ten/anh nhom...).
@@ -991,7 +1019,7 @@ async function processUpdate(update) {
       const isUserUpload = msg.photo || msg.document || msg.video || msg.voice ||
         msg.audio || msg.sticker || msg.video_note || msg.animation;
       if (isUserUpload) {
-        await send(chatId, '<b>CHƯA HỖ TRỢ</b>\n<blockquote>Bot chưa hỗ trợ nhận file/ảnh trực tiếp. Dùng <code>/agent &lt;mô tả bằng lời&gt;</code> để nhờ AI xử lý (thêm lịch, đặt nhắc việc...).</blockquote>');
+        await send(chatId, '<b>CHƯA HỖ TRỢ</b>\n<blockquote>Bot chỉ nhận ảnh kèm lời nhắn. Gửi ảnh và ghi chú thích <code>/agent &lt;yêu cầu&gt;</code> (vd: <code>/agent thêm lịch từ ảnh này</code>), hoặc dùng <code>/agent &lt;mô tả bằng lời&gt;</code>.</blockquote>');
       }
       return;
     }
@@ -1028,7 +1056,7 @@ async function processUpdate(update) {
       case '/reboot':    await handleReboot(chatId); break;
       case '/agent': {
         const args = parts.slice(1).join(' ');
-        agentApi.handleAgent(chatId, args).catch(e => console.error('[agent error]', e.message));
+        agentApi.handleAgent(chatId, args).catch(e => console.error('[agent error]', redact(e.message)));
         break;
       }
       case '/new':
@@ -1055,7 +1083,7 @@ async function poll() {
       console.log(`[poll] Initialized offset to ${lastUpdateId}`);
     }
   } catch (e) {
-    console.error('[poll init error]', e.message);
+    console.error('[poll init error]', redact(e.message));
   }
 
   await send(ALLOWED_CHAT,
@@ -1084,7 +1112,7 @@ async function poll() {
       }
     } catch (e) {
       if (!e.message?.includes('timeout')) {
-        console.error('[poll loop error]', e.message);
+        console.error('[poll loop error]', redact(e.message));
       }
       await new Promise(r => setTimeout(r, 2000));
     }
