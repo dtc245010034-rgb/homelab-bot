@@ -795,6 +795,10 @@ async function handleWeekly(chatId, msgId = null) {
 
 // ─── /reboot ──────────────────────────────────────────────
 async function handleReboot(chatId, msgId = null) {
+  if (agentApi.hasPendingConfirm(chatId)) {
+    await render(chatId, '<b>AGENT ĐANG CHỜ XÁC NHẬN</b>\n<blockquote>Hãy bấm nút (hoặc gõ <code>yes</code>/<code>no</code>) cho yêu cầu của agent trước.</blockquote>', null, msgId);
+    return;
+  }
   if (rebootConfirmPending) {
     await render(chatId, '<b>XÁC NHẬN REBOOT</b>\n<blockquote>Đang chờ xác nhận. Hãy gõ <code>yes</code> hoặc <code>no</code>.</blockquote>', null, msgId);
     return;
@@ -919,11 +923,20 @@ const agentApi = createAgent({
   clearScheduleWeek: schedule.clearWeekSlot,
   getCurrentWeekPath: schedule.getWeekPath,
   removeScheduleItem: schedule.removeItem,
+  editScheduleItem: schedule.editItem,
+  peekScheduleItem: schedule.peekItem,
   weekRangeLabel: schedule.weekRangeLabel,
 });
 
 // ─── Ảnh gửi kèm /agent ────────────────────────────────────
+async function refuseAgentWhileRebootPending(chatId) {
+  if (!rebootConfirmPending) return false;
+  await send(chatId, '<b>ĐANG CHỜ XÁC NHẬN REBOOT</b>\n<blockquote>Hãy gõ <code>yes</code> hoặc <code>no</code> cho yêu cầu reboot trước, rồi dùng agent.</blockquote>');
+  return true;
+}
+
 async function handleAgentPhoto(chatId, agentText, photoSizes) {
+  if (await refuseAgentWhileRebootPending(chatId)) return;
   const photo = pickPhoto(photoSizes);
   if (!photo) {
     await send(chatId, '<b>ẢNH QUÁ LỚN</b>\n<blockquote>Ảnh vượt giới hạn 4 MB, hãy gửi ảnh nhỏ hơn.</blockquote>');
@@ -954,6 +967,11 @@ async function processUpdate(update) {
         return;
       }
       await answerCb(cb.id);
+
+      if (cb.data.startsWith('agc:')) {
+        await agentApi.handleConfirmCallback(chatId, msgId, cb.data);
+        return;
+      }
 
       if (cb.data.startsWith('agent_model_')) {
         agentApi.setModelManually(parseInt(cb.data.slice('agent_model_'.length), 10));
@@ -1055,6 +1073,7 @@ async function processUpdate(update) {
       case '/wmap':      run('wmap', () => handleWmap(chatId, parts.slice(1))); break;
       case '/reboot':    await handleReboot(chatId); break;
       case '/agent': {
+        if (await refuseAgentWhileRebootPending(chatId)) break;
         const args = parts.slice(1).join(' ');
         agentApi.handleAgent(chatId, args).catch(e => console.error('[agent error]', redact(e.message)));
         break;

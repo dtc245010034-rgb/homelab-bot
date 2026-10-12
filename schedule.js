@@ -2,6 +2,7 @@ const fs = require('fs');
 const path = require('path');
 const ExcelJS = require('exceljs');
 const fsutil = require('./fsutil');
+const { splitCell, joinCell, findLine, removeLine, replaceLine, addLineUnique } = require('./lib/schedule-cell');
 
 const SCHEDULE_DIR  = path.join(__dirname, 'schedule');
 const ARCHIVE_DIR   = path.join(SCHEDULE_DIR, 'archive');
@@ -131,7 +132,7 @@ async function ensureWeekFile(weekOffset, now = new Date()) {
   await writeWorkbookAtomic(wb, p);
 }
 
-async function addItem({ date, session, time, content }) {
+async function openSlot({ date, session }) {
   const now = new Date();
   const { weekOffset, dayIdx } = resolveWeekSlot(date, now);
   const sessionIdx = SESSIONS.indexOf(session);
@@ -142,38 +143,41 @@ async function addItem({ date, session, time, content }) {
 
   const wb = new ExcelJS.Workbook();
   await wb.xlsx.readFile(filePath);
-  const ws = wb.getWorksheet('LichTuan');
+  const cell = wb.getWorksheet('LichTuan').getRow(3 + sessionIdx).getCell(2 + dayIdx);
+  return { wb, filePath, cell, lines: splitCell(cell.text) };
+}
 
-  const col = 2 + dayIdx;
-  const row = 3 + sessionIdx;
-  const cell = ws.getRow(row).getCell(col);
-  const line = `${time} - ${content}`;
-  cell.value = cell.value ? `${cell.value}\n${line}` : line;
+async function saveSlot({ wb, filePath, cell }, lines) {
+  cell.value = joinCell(lines);
   cell.alignment = { wrapText: true, vertical: 'top' };
-
   await writeWorkbookAtomic(wb, filePath);
   return filePath;
 }
 
-async function removeItem({ date, session }) {
-  const now = new Date();
-  const { weekOffset, dayIdx } = resolveWeekSlot(date, now);
-  const sessionIdx = SESSIONS.indexOf(session);
-  if (sessionIdx === -1) throw new Error(`session không hợp lệ: "${session}"`);
+async function addItem({ date, session, time, content }) {
+  const slot = await openSlot({ date, session });
+  const { lines, duplicate } = addLineUnique(slot.lines, `${time} - ${content}`);
+  if (duplicate) return { filePath: slot.filePath, duplicate: true };
+  return { filePath: await saveSlot(slot, lines), duplicate: false };
+}
 
-  await ensureWeekFile(weekOffset, now);
-  const filePath = WEEK_PATHS[weekOffset];
+// Chỉ đọc: xác định dòng sẽ bị xoá/sửa để hiện trong bước xác nhận. Ném ScheduleCellError nếu match không hợp lệ.
+async function peekItem({ date, session, match }) {
+  const { lines } = await openSlot({ date, session });
+  return findLine(lines, match).line;
+}
 
-  const wb = new ExcelJS.Workbook();
-  await wb.xlsx.readFile(filePath);
-  const ws = wb.getWorksheet('LichTuan');
+async function removeItem({ date, session, match }) {
+  const slot = await openSlot({ date, session });
+  const { lines, removed } = removeLine(slot.lines, match);
+  return { filePath: await saveSlot(slot, lines), removed };
+}
 
-  const col = 2 + dayIdx;
-  const row = 3 + sessionIdx;
-  ws.getRow(row).getCell(col).value = '';
-
-  await writeWorkbookAtomic(wb, filePath);
-  return filePath;
+async function editItem({ date, session, match, time, content }) {
+  const slot = await openSlot({ date, session });
+  const newLine = `${time} - ${content}`;
+  const { lines, old } = replaceLine(slot.lines, match, newLine);
+  return { filePath: await saveSlot(slot, lines), old, new: newLine };
 }
 
 async function getWeekPath(weekOffset = 0) {
@@ -272,6 +276,8 @@ module.exports = {
   ensureWeekFile,
   addItem,
   removeItem,
+  editItem,
+  peekItem,
   getWeekPath,
   getWeekText,
   getTodayDigestText,
