@@ -1,6 +1,6 @@
 {
   "name": "homelab-bot",
-  "version": "2.2.0",
+  "version": "2.3.0",
   "description": "Bot Telegram quản lý homelab (Linux) kèm trợ lý AI Gemini: giám sát máy chủ, camera, Pi-hole, lịch tuần, nhắc việc, bản tin AI tự động.",
   "license": "MIT",
   "repository": {

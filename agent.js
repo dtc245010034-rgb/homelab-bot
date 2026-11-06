@@ -1032,7 +1032,7 @@ function createAgent(deps) {
         if (Date.now() > deadline) { timedOut = true; break; }
 
         const response = await callGeminiWithRetry({
-          contents: trimForApi(session.contents),
+          contents: historyLib.compactForApi(trimForApi(session.contents)),
           config: { systemInstruction, tools: [{ functionDeclarations }] },
         });
 

@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { fold, queryTerms, sessionToExchanges, buildTranscript, countUserTurns, searchHistory } = require('../lib/agent-history');
+const { fold, queryTerms, sessionToExchanges, buildTranscript, compactForApi, countUserTurns, searchHistory } = require('../lib/agent-history');
 
 const u = (t) => ({ role: 'user', parts: [{ text: t }] });
 const m = (t) => ({ role: 'model', parts: [{ text: t }] });
@@ -100,4 +100,26 @@ test('searchHistory: file hong / thu muc thieu / tu khoa trong khong lam bot che
     assert.deepEqual(searchHistory({ sessionsDir: '/khong/co', archiveDir: '/khong/co/a', summariesDir: '/khong/co/s', chatId: 1, query: 'abc' }).exchanges, []);
     assert.ok(searchHistory({ ...dirs, chatId: 42, query: '  ' }).error);
   } finally { done(); }
+});
+
+test('compactForApi: lich su cu chi con chu hoi-dap, cau hoi hien tai va buoc tool cua no giu nguyen', () => {
+  const contents = [
+    u('thời tiết?'), call('getWeather'), resp('getWeather', 'du lieu tho rat dai'), m('Hà Nội 25 độ'),
+    u('tin AI?'), call('getAiNews'), resp('getAiNews', 'tin tho'), m('có 3 tin'),
+    u('so sánh hai câu trên'), call('recall'), resp('recall', 'ghi nho'),
+  ];
+  const out = compactForApi(contents);
+  assert.deepEqual(out.slice(0, 4), [u('thời tiết?'), m('Hà Nội 25 độ'), u('tin AI?'), m('có 3 tin')].map(c => ({ role: c.role, parts: c.parts })));
+  assert.deepEqual(out.slice(4), contents.slice(8)); // cau hoi hien tai + functionCall/Response cua no
+  assert.equal(JSON.stringify(out.slice(0, 4)).includes('functionResponse'), false);
+  assert.equal(contents.length, 11); // khong sua mang goc
+});
+
+test('compactForApi: gop luot cung vai tro, bo luot rong, khong co lich su cu thi giu nguyen', () => {
+  const contents = [u('a'), { role: 'model', parts: [{ text: 'dang tim' }, { functionCall: { name: 'x', args: {} } }] }, resp('x', 'r'), m('xong'), u('b')];
+  const out = compactForApi(contents);
+  assert.deepEqual(out.map(c => c.role), ['user', 'model', 'user']);
+  assert.deepEqual(out[1].parts, [{ text: 'dang tim' }, { text: 'xong' }]);
+  const first = [u('chi mot cau')];
+  assert.equal(compactForApi(first), first);
 });
