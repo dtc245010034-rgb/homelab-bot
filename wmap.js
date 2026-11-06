@@ -1,4 +1,4 @@
-// wmap.js — Dog.Bot v2: weather map generator (OWM tiles + ImageMagick)
+// wmap.js — weather map generator (OWM tiles + ImageMagick)
 // Đặt file này cùng thư mục với bot.js (~/uptime-kuma/wmap.js)
 // Yêu cầu: ImageMagick (`convert`) đã có sẵn trên máy (đang dùng cho motion-check.js)
 // API key OWM được truyền vào từ bot.js (tham số thứ 3 của generateWeatherMap),
@@ -41,7 +41,7 @@ function finalArgs(grid, mx, my, caption, out) {
     '-draw', `circle ${mx},${my} ${mx + 6},${my}`,
     '-font', FONT,
     '-gravity', 'NorthEast', '-pointsize', '13', '-stroke', 'none', '-fill', 'white',
-    '-undercolor', '#00000090', '-annotate', '+6+6', ' Dog.Bot ',
+    '-undercolor', '#00000090', '-annotate', '+6+6', ` ${WMAP.watermark} `,
     '-gravity', 'South', '-background', '#00000090', '-splice', '0x32', '+repage',
     '-pointsize', '15', '-fill', 'white', '-undercolor', 'none', '-annotate', '+0+9', caption,
     out,
@@ -56,12 +56,14 @@ const LAYERS = {
 };
 
 const LOCATION = require('./config').getLocation();
+const SET = require('./config').getSettings();
+const WMAP = SET.WMAP;
 
 // [lonMin, latMin, lonMax, latMax] — phủ toàn VN + Biển Đông
 const PRESETS = {
   vn: { bbox: [100, 5, 120, 24], zoom: 5, label: 'Việt Nam + Biển Đông' },
   // 'tn' = khu vuc cua ban (LOCATION_* trong .env); giu khoa 'tn' de khong doi callback cu
-  tn: { center: [LOCATION.lat, LOCATION.lon], zoom: 9, radius: 1, label: LOCATION.name },
+  tn: { center: [LOCATION.lat, LOCATION.lon], zoom: WMAP.localZoom, radius: WMAP.localRadius, label: LOCATION.name },
 };
 
 const HOME = [LOCATION.lat, LOCATION.lon];
@@ -203,8 +205,8 @@ async function generateWeatherMap(presetKey = 'vn', layerKey = 'rain', apiKey) {
     const my = Math.round(markerPx.y - originPx.y);
 
     const caption = `${preset.label} - ${layerKey.toUpperCase()} - ${new Date().toLocaleString(
-      'vi-VN',
-      { timeZone: 'Asia/Ho_Chi_Minh' }
+      SET.LOCALE,
+      { timeZone: SET.TIMEZONE }
     )}`;
     const finalFile = path.join(tmpDir, 'final.png');
     await convert(finalArgs(gridFile, mx, my, caption, finalFile));

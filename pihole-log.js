@@ -1,21 +1,22 @@
 const axios = require('axios');
 const fs    = require('fs');
 const path  = require('path');
+const S     = require('./config').getSettings();
 
 const PIHOLE_SECRET = path.join(__dirname, '.pihole-secret');
 const LOG_FILE      = path.join(__dirname, 'pihole-weekly.json');
 
 async function saveDailySnapshot() {
   try {
-    const pass    = fs.readFileSync(PIHOLE_SECRET, 'utf8').trim();
-    const authRes = await axios.post('http://localhost/api/auth', { password: pass });
+    const pass    = S.PIHOLE.password || fs.readFileSync(PIHOLE_SECRET, 'utf8').trim();
+    const authRes = await axios.post(`${S.PIHOLE.url}/api/auth`, { password: pass });
     const sid     = authRes.data?.session?.sid;
-    const { data } = await axios.get('http://localhost/api/stats/summary', {
+    const { data } = await axios.get(`${S.PIHOLE.url}/api/stats/summary`, {
       headers: { 'sid': sid }
     });
-    axios.delete('http://localhost/api/auth', { headers: { 'sid': sid } }).catch(() => {});
+    axios.delete(`${S.PIHOLE.url}/api/auth`, { headers: { 'sid': sid } }).catch(() => {});
 
-    const today   = new Date().toLocaleDateString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh' });
+    const today   = new Date().toLocaleDateString(S.LOCALE, { timeZone: S.TIMEZONE });
     const blocked = (data.queries?.status?.GRAVITY ?? 0) + (data.queries?.status?.GRAVITY_CNAME ?? 0);
     const entry   = {
       date    : today,

@@ -74,3 +74,111 @@ test('KNOWN_DEVICES, MAIN_PC va broadcast duoc doc tu env', () => {
   assert.deepEqual(getLocation({ LOCATION_NAME: 'Huế', LOCATION_LAT: '16.46', LOCATION_LON: '107.59' }), { name: 'Huế', lat: 16.46, lon: 107.59 });
   assert.equal(getLocation({ LOCATION_LAT: 'abc', LOCATION_LON: '1' }).name, 'Hà Nội');
 });
+
+// ─── getSettings: moi gia tri tuy bien co mac dinh, sai dinh dang thi dung mac dinh ───
+const { getSettings, parseWhen, parseFeeds } = require('../config');
+
+test('getSettings: khong cau hinh gi -> mac dinh nhu truoc khi co tuy bien', () => {
+  const s = getSettings({});
+  assert.equal(s.TIMEZONE, 'Asia/Ho_Chi_Minh');
+  assert.equal(s.LOCALE, 'vi-VN');
+  assert.deepEqual([s.ALERTS.cpuPct, s.ALERTS.ramPct, s.ALERTS.diskPct, s.ALERTS.tempC], [85, 85, 85, 78]);
+  assert.equal(s.ALERTS.cooldownMs, 30 * 60_000);
+  assert.equal(s.ALERTS.checkMs, 5 * 60_000);
+  assert.equal(s.MOTION.threshold, 6000);
+  assert.equal(s.MOTION.cooldownMs, 5 * 60_000);
+  assert.equal(s.MOTION.clipSeconds, 10);
+  assert.equal(s.AGENT.maxToolLoops, 8);
+  assert.equal(s.AGENT.requestTimeoutMs, 90_000);
+  assert.equal(s.AGENT.sessionIdleMs, 48 * 3600_000);
+  assert.equal(s.PIHOLE.url, 'http://localhost');
+  assert.equal(s.DISK_MOUNT, '/');
+  assert.deepEqual([...s.MORNING.sections].sort(), ['map', 'news', 'stocks', 'weather']);
+  assert.deepEqual(s.MORNING.symbols, ['E1VFVN30.VN']);
+  assert.equal(s.NEWS_FEEDS, null);
+});
+
+test('getSettings: doc gia tri tu env', () => {
+  const s = getSettings({
+    TIMEZONE: 'Europe/Paris', ALERT_CPU_PCT: '90', ALERT_COOLDOWN_MIN: '10', ALERTS_ENABLED: 'off',
+    PIHOLE_URL: 'http://192.168.1.2:8080/', MOTION_THRESHOLD: '9000', AGENT_MAX_TOOL_LOOPS: '4',
+    GEMINI_MODEL: 'm1', GEMINI_FALLBACK_MODELS: 'm2, m3', MORNING_SECTIONS: 'weather,news', MORNING_SYMBOLS: 'VNM.VN;FPT.VN',
+  });
+  assert.equal(s.TIMEZONE, 'Europe/Paris');
+  assert.equal(s.ALERTS.cpuPct, 90);
+  assert.equal(s.ALERTS.cooldownMs, 10 * 60_000);
+  assert.equal(s.ALERTS.enabled, false);
+  assert.equal(s.PIHOLE.url, 'http://192.168.1.2:8080');
+  assert.equal(s.MOTION.threshold, 9000);
+  assert.equal(s.AGENT.maxToolLoops, 4);
+  assert.equal(s.AGENT.model, 'm1');
+  assert.deepEqual(s.AGENT.fallbackModels, ['m2', 'm3']);
+  assert.equal(s.MORNING.sections.has('stocks'), false);
+  assert.deepEqual(s.MORNING.symbols, ['VNM.VN', 'FPT.VN']);
+});
+
+test('getSettings: gia tri sai (chu, ngoai khoang, mui gio la) -> mac dinh, khong nem loi', () => {
+  const s = getSettings({ TIMEZONE: 'Khong/Co', ALERT_CPU_PCT: 'abc', ALERT_TEMP_C: '500', MOTION_INTERVAL_SEC: '0', AGENT_MAX_TOOL_LOOPS: '-3', MORNING_MAP_PRESET: 'xx' });
+  assert.equal(s.TIMEZONE, 'Asia/Ho_Chi_Minh');
+  assert.equal(s.ALERTS.cpuPct, 85);
+  assert.equal(s.ALERTS.tempC, 78);
+  assert.equal(s.MOTION.intervalMs, 60_000);
+  assert.equal(s.AGENT.maxToolLoops, 8);
+  assert.equal(s.MORNING.mapPreset, 'vn');
+});
+
+test('parseWhen: gio, thu + gio, off, sai dinh dang', () => {
+  assert.deepEqual(parseWhen('06:30'), { hour: 6, minute: 30 });
+  assert.deepEqual(parseWhen('sat 07:30'), { hour: 7, minute: 30, dayOfWeek: 6 });
+  assert.deepEqual(parseWhen('CN 9:05'), { hour: 9, minute: 5, dayOfWeek: 0 });
+  assert.deepEqual(parseWhen('off'), { off: true });
+  assert.equal(parseWhen('25:00'), null);
+  assert.equal(parseWhen('abc'), null);
+  assert.equal(parseWhen(''), null);
+});
+
+test('parseFeeds: "Ten|url|max;..." bo muc sai, rong -> null', () => {
+  assert.deepEqual(parseFeeds('A|https://a.com/rss|2;B|https://b.com/x'), [
+    { name: 'A', url: 'https://a.com/rss', max: 2 },
+    { name: 'B', url: 'https://b.com/x', max: 3 },
+  ]);
+  assert.equal(parseFeeds('khong hop le;javascript:alert(1)'), null);
+  assert.equal(parseFeeds(''), null);
+});
+
+test('loadConfig: TELEGRAM_API_BASE doi duoc may chu API (proxy / Bot API cuc bo)', () => {
+  const base = { TELEGRAM_BOT_TOKEN: '1:abc', ALLOWED_CHAT_ID: '5' };
+  assert.equal(loadConfig(base).API, 'https://api.telegram.org/bot1:abc');
+  assert.equal(loadConfig({ ...base, TELEGRAM_API_BASE: 'http://127.0.0.1:8081/' }).API, 'http://127.0.0.1:8081/bot1:abc');
+});
+
+// .env.example khong duoc noi doi voi code: gia tri ghi san trong cac dong "#KEY=..." phai dung bang mac dinh that.
+test('.env.example: bo dau # cac dong tuy chon -> cai dat khong doi so voi mac dinh', () => {
+  const fs = require('fs');
+  const path = require('path');
+  const dotenv = require('dotenv');
+  const text = fs.readFileSync(path.join(__dirname, '..', '.env.example'), 'utf8');
+  const uncommented = text.replace(/^#([A-Z][A-Z0-9_]*=)/gm, '$1');
+  const env = dotenv.parse(uncommented);
+  // dong "Bat buoc" de trong, con model/vi tri co gia tri that: chi so cac nhom tuy bien
+  const pick = (s) => JSON.stringify({ ...s, MORNING: { ...s.MORNING, sections: [...s.MORNING.sections].sort() } },
+    (k, v) => (['SCHEDULES', 'NEWS_FEEDS', 'AI_NEWS_FEEDS'].includes(k) ? undefined : v));
+  assert.equal(pick(getSettings(env)), pick(getSettings({})));
+
+  // Gio tac vu he thong ghi trong file mau = gio mac dinh trong SYSTEM_SEEDS
+  const { SYSTEM_SEEDS, buildSystemSeeds } = require('../scheduler');
+  assert.deepEqual(buildSystemSeeds(getSettings(env).SCHEDULES), SYSTEM_SEEDS);
+  // Nguon tin mau doc duoc
+  assert.ok(getSettings(env).NEWS_FEEDS.length >= 2);
+  assert.ok(getSettings(env).AI_NEWS_FEEDS.length >= 1);
+});
+
+test('moi bien getSettings doc deu co mat trong .env.example (khong sot bien nao)', () => {
+  const fs = require('fs');
+  const path = require('path');
+  const src = fs.readFileSync(path.join(__dirname, '..', 'config.js'), 'utf8');
+  const used = [...src.matchAll(/env\.([A-Z][A-Z0-9_]+)/g)].map(m => m[1]);
+  const example = fs.readFileSync(path.join(__dirname, '..', '.env.example'), 'utf8');
+  const missing = [...new Set(used)].filter(k => k !== 'TZ' && !new RegExp(`^#?${k}=`, 'm').test(example));
+  assert.deepEqual(missing, []);
+});

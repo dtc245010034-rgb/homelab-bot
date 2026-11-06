@@ -14,7 +14,7 @@ const { generateWeatherMap } = require('./wmap');
 const { createAgent, getCurrentModel } = require('./agent');
 const { createScheduler } = require('./scheduler');
 const schedule = require('./schedule');
-const { loadConfig } = require('./config');
+const { loadConfig, getSettings } = require('./config');
 const { redact, safeError } = require('./lib/redact');
 const { captureSnapshot, CameraError } = require('./lib/camera');
 const { evaluateAlerts, createCooldown } = require('./lib/alerts');
@@ -26,6 +26,7 @@ const run = createDetacher(); // lenh cham chay nen, khong chan vong poll Telegr
 
 // ─── Config ───────────────────────────────────────────────
 const { API, TOKEN, CHAT_ID: ALLOWED_CHAT, CAM_RTSP, CAM_HOST, OWM_KEY, MAIN_PC_IP, MAIN_PC_MAC: MAC_ADDRESS, WOL_BROADCAST, KNOWN_DEVICES, LOCATION } = loadConfig();
+const S = getSettings();
 const PIHOLE_SECRET = path.join(__dirname, '.pihole-secret');
 const MOTION_STATE  = path.join(__dirname, '.motion-state');
 const CAM_SNAP      = '/tmp/cam_snap.jpg';
@@ -107,40 +108,45 @@ function progressBar(pct, len = 8) {
   return '█'.repeat(filled) + '░'.repeat(len - filled);
 }
 
-function getStatusTag(val, warn = 75, crit = 85) {
+function getStatusTag(val, warn = S.STATUS_WARN_PCT, crit = S.STATUS_CRIT_PCT) {
   if (val >= crit) return '<code>[NGUY HIỂM]</code>';
   if (val >= warn) return '<code>[CẢNH BÁO]</code>';
   return '<code>[ỔN ĐỊNH]</code>';
 }
 
 // ─── Pi-hole Helper ───────────────────────────────────────
+function piholePassword() {
+  if (S.PIHOLE.password) return S.PIHOLE.password;
+  if (!fs.existsSync(PIHOLE_SECRET)) throw new Error('Chưa cấu hình mật khẩu Pi-hole (PIHOLE_PASSWORD trong .env hoặc file .pihole-secret)');
+  return fs.readFileSync(PIHOLE_SECRET, 'utf8').trim();
+}
+
 async function setPiholeBlocking(enable, seconds = 0) {
-  if (!fs.existsSync(PIHOLE_SECRET)) throw new Error('Pi-hole secret file not found');
-  const pass = fs.readFileSync(PIHOLE_SECRET, 'utf8').trim();
-  const authRes = await axios.post('http://localhost/api/auth', { password: pass }, { timeout: 5000 });
+  const pass = piholePassword();
+  const authRes = await axios.post(`${S.PIHOLE.url}/api/auth`, { password: pass }, { timeout: 5000 });
   const sid = authRes.data?.session?.sid;
   if (!sid) throw new Error('Auth failed');
   const body = { blocking: enable };
   if (!enable && seconds > 0) body.timer = seconds;
-  await axios.post('http://localhost/api/dns/blocking', body, { headers: { sid }, timeout: 5000 });
-  axios.delete('http://localhost/api/auth', { headers: { sid } }).catch(() => {});
+  await axios.post(`${S.PIHOLE.url}/api/dns/blocking`, body, { headers: { sid }, timeout: 5000 });
+  axios.delete(`${S.PIHOLE.url}/api/auth`, { headers: { sid } }).catch(() => {});
 }
 
 async function getPiholeStats() {
-  if (!fs.existsSync(PIHOLE_SECRET)) throw new Error('Pi-hole secret file not found');
-  const pass = fs.readFileSync(PIHOLE_SECRET, 'utf8').trim();
-  const authRes = await axios.post('http://localhost/api/auth', { password: pass }, { timeout: 5000 });
+  const pass = piholePassword();
+  const authRes = await axios.post(`${S.PIHOLE.url}/api/auth`, { password: pass }, { timeout: 5000 });
   const sid = authRes.data?.session?.sid;
   if (!sid) throw new Error('Auth failed');
-  const { data } = await axios.get('http://localhost/api/stats/summary', { headers: { sid }, timeout: 5000 });
-  axios.delete('http://localhost/api/auth', { headers: { sid } }).catch(() => {});
+  const { data } = await axios.get(`${S.PIHOLE.url}/api/stats/summary`, { headers: { sid }, timeout: 5000 });
+  axios.delete(`${S.PIHOLE.url}/api/auth`, { headers: { sid } }).catch(() => {});
   return data;
 }
 
 // ─── System Alerts ────────────────────────────────────────
-const alertCooldown = createCooldown(30 * 60 * 1000);
+const alertCooldown = createCooldown(S.ALERTS.cooldownMs);
 
 async function checkAlerts() {
+  if (!S.ALERTS.enabled) return;
   try {
     const [cpu, mem, disks, temps] = await Promise.all([
       si.currentLoad(),
@@ -149,14 +155,14 @@ async function checkAlerts() {
       si.cpuTemperature()
     ]);
     const ramPct = ((mem.total - mem.available) / mem.total) * 100;
-    const rootD  = disks.find(x => x.mount === '/') || disks[0];
+    const rootD  = disks.find(x => x.mount === S.DISK_MOUNT) || disks[0];
 
     const alerts = evaluateAlerts({
       cpuPct: cpu.currentLoad,
       ramPct,
       diskPct: rootD?.use ?? 0,
       tempC: temps.main || 0,
-    }).filter(a => alertCooldown.ready(a.key)); // moi loai canh bao toi da 1 lan / 30 phut
+    }, S.ALERTS).filter(a => alertCooldown.ready(a.key)); // moi loai canh bao toi da 1 lan / ALERT_COOLDOWN_MIN
 
     if (alerts.length > 0) {
       await send(ALLOWED_CHAT,
@@ -185,7 +191,7 @@ async function getSystemStatus() {
   const ramPct   = ((mem.total - mem.available) / mem.total) * 100;
   const ramUsed  = (mem.total - mem.available) / 1024 ** 3;
   const ramTotal = mem.total / 1024 ** 3;
-  const rootD    = disks.find(x => x.mount === '/') || disks[0];
+  const rootD    = disks.find(x => x.mount === S.DISK_MOUNT) || disks[0];
   const diskPct  = rootD?.use ?? 0;
   const diskUsed = rootD ? rootD.used / 1024 ** 3 : null;
   const diskTotal= rootD ? rootD.size / 1024 ** 3 : null;
@@ -473,7 +479,7 @@ async function handleCleanup(chatId, msgId = null) {
       `<blockquote>` +
       `▸ <b>Dung lượng vừa giải phóng:</b> <code>${totalFreedMb} MB</code>\n` +
       `▸ <b>Trạng thái ổ cứng SSD:</b> <code>${diskInfo.trim()}</code>\n` +
-      `▸ <b>Thời gian thực hiện:</b> <code>${new Date().toLocaleTimeString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh' })}</code>` +
+      `▸ <b>Thời gian thực hiện:</b> <code>${new Date().toLocaleTimeString(S.LOCALE, { timeZone: S.TIMEZONE })}</code>` +
       `</blockquote>`;
 
     const buttons = [
@@ -595,7 +601,7 @@ async function handleCam(chatId) {
     const form = new FormData();
     form.append('chat_id', chatId);
     form.append('photo', fs.createReadStream(CAM_SNAP));
-    form.append('caption', `📷 Camera Snapshot — ${new Date().toLocaleString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh' })}`);
+    form.append('caption', `📷 Camera Snapshot — ${new Date().toLocaleString(S.LOCALE, { timeZone: S.TIMEZONE })}`);
     await axios.post(`${API}/sendPhoto`, form, { headers: form.getHeaders(), timeout: 15000 });
   } catch (e) {
     console.error('[cam error]', redact(e.detail || e.message));
@@ -729,7 +735,7 @@ async function handleWeekly(chatId, msgId = null) {
       si.currentLoad(), si.mem(), si.fsSize(), si.time()
     ]);
     const ramPct  = ((mem.total - mem.available) / mem.total) * 100;
-    const rootD   = disks.find(x => x.mount === '/') || disks[0];
+    const rootD   = disks.find(x => x.mount === S.DISK_MOUNT) || disks[0];
     const diskPct = rootD?.use ?? 0;
 
     let etfLine = '';
@@ -1114,7 +1120,7 @@ async function poll() {
   );
 
   while (true) {
-    if (Date.now() - lastAlertCheck > 5 * 60 * 1000) {
+    if (Date.now() - lastAlertCheck > S.ALERTS.checkMs) {
       lastAlertCheck = Date.now();
       checkAlerts().catch(() => {});
     }

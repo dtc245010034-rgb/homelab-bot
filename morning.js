@@ -8,6 +8,7 @@ const { getRSS } = require('./lib/rss');
 // ─── Config ───────────────────────────────────────────────
 const { CHAT_ID, OWM_KEY, API } = require('./config').loadConfig();
 const THAI_NGUYEN  = require('./config').getLocation(); // ten cu giu nguyen de khong sua nhieu cho; gia tri lay tu LOCATION_* trong .env
+const S = require('./config').getSettings();
 
 // ─── Helpers ──────────────────────────────────────────────
 async function send(text) {
@@ -26,7 +27,7 @@ async function send(text) {
 // ─── ETF Price ────────────────────────────────────────────
 async function getETFPrice() {
   try {
-    const symbols = ['E1VFVN30.VN'];
+    const symbols = S.MORNING.symbols;
     const results = [];
 
     for (const symbol of symbols) {
@@ -45,12 +46,12 @@ async function getETFPrice() {
         const changePct = ((change / prev) * 100).toFixed(2);
         const sign      = change >= 0 ? '+' : '';
         const tag       = change >= 0 ? '[TĂNG]' : '[GIẢM]';
-        const name      = symbol === 'E1VFVN30.VN' ? 'E1VFVN30' : 'TCSME';
+        const name      = symbol.replace(/\.[A-Z]+$/, '');
         results.push(
-          `▸ <b>${name}:</b> <code>${price.toLocaleString('vi-VN')}đ</code> (${sign}${changePct}%) <code>${tag}</code>`
+          `▸ <b>${name}:</b> <code>${price.toLocaleString(S.LOCALE)}đ</code> (${sign}${changePct}%) <code>${tag}</code>`
         );
       } catch {
-        const name = symbol === 'E1VFVN30.VN' ? 'E1VFVN30' : 'TCSME';
+        const name = symbol.replace(/\.[A-Z]+$/, '');
         results.push(`▸ <b>${name}:</b> <code>[Không lấy được dữ liệu]</code>`);
       }
     }
@@ -73,8 +74,8 @@ async function getWeather() {
     const desc     = now.weather[0].description;
 
     const slots = data.list.slice(0, 4).map(x => {
-      const hour = new Date(x.dt * 1000).toLocaleTimeString('vi-VN', {
-        timeZone: 'Asia/Ho_Chi_Minh', hour: '2-digit', minute: '2-digit'
+      const hour = new Date(x.dt * 1000).toLocaleTimeString(S.LOCALE, {
+        timeZone: S.TIMEZONE, hour: '2-digit', minute: '2-digit'
       });
       const t = Math.round(x.main.temp);
       const r = x.rain?.['3h'] ? ` [Mưa ${x.rain['3h']}mm]` : '';
@@ -108,42 +109,30 @@ async function getWeather() {
 // ─── Main Report ──────────────────────────────────────────
 async function sendMorningReport() {
   console.log('[morning] Generating Modern Card report...');
-  const hour = new Date().toLocaleString('en-US', { timeZone: 'Asia/Ho_Chi_Minh', hour: 'numeric', hour12: false });
+  const hour = new Date().toLocaleString('en-US', { timeZone: S.TIMEZONE, hour: 'numeric', hour12: false });
   const hNum = parseInt(hour, 10);
   const timeLabel = hNum >= 5 && hNum < 12 ? 'BÁO CÁO BUỔI SÁNG' : hNum >= 12 && hNum < 18 ? 'BÁO CÁO BUỔI TRƯA' : 'BÁO CÁO BUỔI TỐI';
-  const now = new Date().toLocaleString('vi-VN', {
-    timeZone: 'Asia/Ho_Chi_Minh',
+  const now = new Date().toLocaleString(S.LOCALE, {
+    timeZone: S.TIMEZONE,
     weekday: 'long', day: '2-digit', month: '2-digit', year: 'numeric',
     hour: '2-digit', minute: '2-digit'
   });
 
+  const want = (k) => S.MORNING.sections.has(k);
   const [etf, weather, rss, mapPath] = await Promise.all([
-    getETFPrice(),
-    getWeather(),
-    getRSS(),
-    generateWeatherMap('vn', 'rain', OWM_KEY).catch(e => { console.error('[morning-wmap]', e.message); return null; })
+    want('stocks') ? getETFPrice() : null,
+    want('weather') ? getWeather() : null,
+    want('news') ? getRSS() : null,
+    want('map') ? generateWeatherMap(S.MORNING.mapPreset, S.MORNING.mapLayer, OWM_KEY).catch(e => { console.error('[morning-wmap]', e.message); return null; }) : null,
   ]);
 
-  const msg =
-    `<b>${timeLabel}</b>\n` +
-    `<blockquote>` +
-    `📅 <b>Thời gian:</b> <code>${now}</code>` +
-    `</blockquote>\n\n` +
-
-    `<b>THỊ TRƯỜNG CHỨNG KHOÁN</b>\n` +
-    `<blockquote>\n` +
-    `${etf}\n` +
-    `</blockquote>\n\n` +
-
-    `<b>DỰ BÁO THỜI TIẾT</b>\n` +
-    `<blockquote>\n` +
-    `${weather}\n` +
-    `</blockquote>\n\n` +
-
-    `<b>BẢN TIN CHỌN LỌC</b>\n` +
-    `<blockquote>\n` +
-    `${rss}\n` +
-    `</blockquote>`;
+  const card = (title, body) => (body ? `<b>${title}</b>\n<blockquote>\n${body}\n</blockquote>` : null);
+  const msg = [
+    `<b>${timeLabel}</b>\n<blockquote>📅 <b>Thời gian:</b> <code>${now}</code></blockquote>`,
+    card('THỊ TRƯỜNG CHỨNG KHOÁN', etf),
+    card('DỰ BÁO THỜI TIẾT', weather),
+    card('BẢN TIN CHỌN LỌC', rss),
+  ].filter(Boolean).join('\n\n');
 
   await send(msg);
 

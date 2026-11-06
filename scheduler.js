@@ -39,6 +39,20 @@ const SYSTEM_SEEDS = [
   { action: 'weeklyReport',            schedule: { kind: 'weekly', dayOfWeek: 1, hour: 8,  minute: 0 } },
 ];
 
+// Ap gio tu .env (SCHEDULE_DAILY_DIGEST, SCHEDULE_WEEKEND_REMINDER, SCHEDULE_WEEKLY_REPORT) len cac seed mac dinh.
+// Gia tri 'off' tat han (seed.off). Ham thuan: tra ve mang moi, khong sua SYSTEM_SEEDS.
+function buildSystemSeeds(schedules = {}) {
+  const pick = { dailyScheduleDigest: schedules.dailyDigest, weekendPlanningReminder: schedules.weekendReminder, weeklyReport: schedules.weeklyReport };
+  return SYSTEM_SEEDS.map(seed => {
+    const w = pick[seed.action];
+    if (!w) return seed;
+    if (w.off) return { ...seed, off: true };
+    const schedule = { ...seed.schedule, hour: w.hour, minute: w.minute };
+    if (seed.schedule.kind === 'weekly' && w.dayOfWeek !== undefined) schedule.dayOfWeek = w.dayOfWeek;
+    return { ...seed, schedule };
+  });
+}
+
 function sameSchedule(a, b) {
   return ['kind', 'dayOfWeek', 'hour', 'minute', 'atISO'].every(k => a[k] === b[k]);
 }
@@ -59,14 +73,18 @@ function reconcileSeeds(jobs, seeds, now) {
         action: s.action,
         schedule: s.schedule,
         nextFireAt: computeNextFireAt(s.schedule, now).toISOString(),
-        active: true,
+        active: !s.off,
         createdAt: now.toISOString(),
       });
       changed = true;
-    } else if (!sameSchedule(existing.schedule || {}, s.schedule)) {
-      existing.schedule = s.schedule;
-      existing.nextFireAt = computeNextFireAt(s.schedule, now).toISOString();
-      changed = true;
+    } else {
+      // Job he thong nguoi dung khong huy duoc (cancelJob chi cham job nguoi dung) nen `active` do .env quyet dinh.
+      if (existing.active !== !s.off) { existing.active = !s.off; changed = true; }
+      if (!sameSchedule(existing.schedule || {}, s.schedule)) {
+        existing.schedule = s.schedule;
+        existing.nextFireAt = computeNextFireAt(s.schedule, now).toISOString();
+        changed = true;
+      }
     }
   }
   return { jobs: out, changed };
@@ -86,7 +104,7 @@ function pruneJobs(jobs, now, keepDays = 7) {
 // Loai job nguoi dung tao: 'message' (gui chu + ghim) va 'agentTask' (den gio chay agent voi `prompt`).
 const USER_JOB_TYPES = new Set(['message', 'agentTask']);
 
-function createScheduler({ send, systemActions, pinMessage, unpinMessage, runAgentTask, dir = SCHEDULER_DIR }) {
+function createScheduler({ send, systemActions, pinMessage, unpinMessage, runAgentTask, dir = SCHEDULER_DIR, seeds = buildSystemSeeds(require('./config').getSettings().SCHEDULES) }) {
   // `dir` chi de test dung thu muc tam, khong dung vao jobs.json that.
   const jobsFile = path.join(dir, 'jobs.json');
   const pinFile = path.join(dir, 'pin-state.json');
@@ -149,11 +167,11 @@ function createScheduler({ send, systemActions, pinMessage, unpinMessage, runAge
 
   function start() {
     fsutil.ensureDirs([dir]);
-    for (const s of SYSTEM_SEEDS) {
+    for (const s of seeds) {
       if (!systemActions[s.action]) console.error(`[scheduler] seed "${s.action}" chưa có handler trong systemActions`);
     }
     const now = new Date();
-    const reconciled = reconcileSeeds(loadJobs(), SYSTEM_SEEDS, now);
+    const reconciled = reconcileSeeds(loadJobs(), seeds, now);
     const pruned = pruneJobs(reconciled.jobs, now);
     if (reconciled.changed || pruned.removed) saveJobs(pruned.jobs);
     if (pruned.removed) console.log(`[scheduler] don ${pruned.removed} job mot lan da het han`);
@@ -198,4 +216,4 @@ function createScheduler({ send, systemActions, pinMessage, unpinMessage, runAge
   return { start, addJob, listJobs, cancelJob, tick };
 }
 
-module.exports = { USER_JOB_TYPES, createScheduler, computeNextFireAt, SYSTEM_SEEDS, reconcileSeeds, pruneJobs };
+module.exports = { USER_JOB_TYPES, createScheduler, computeNextFireAt, SYSTEM_SEEDS, buildSystemSeeds, reconcileSeeds, pruneJobs };

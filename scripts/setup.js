@@ -70,9 +70,17 @@ async function detectChatId(token) {
   }
 
   const lines = Object.entries(env).filter(([, v]) => v).map(([k, v]) => `${k}=${v}`);
-  fs.writeFileSync(ENV_PATH, `# Tạo bởi npm run setup\n${lines.join('\n')}\n`, { mode: 0o600 });
+  // Kem phan "tuy bien nang cao" (cac dong #KEY=mac_dinh) tu .env.example de sua .env la du, khong can mo tai lieu
+  let advanced = '';
+  try {
+    const ex = fs.readFileSync(path.join(__dirname, '..', '.env.example'), 'utf8');
+    const i = ex.indexOf('# ═══ TUY BIEN NANG CAO');
+    if (i >= 0) advanced = `\n${ex.slice(i)}`;
+  } catch {}
+  fs.writeFileSync(ENV_PATH, `# Tạo bởi npm run setup. Doi xong: pm2 restart homelab-bot\n${lines.join('\n')}\n${advanced}`, { mode: 0o600 });
   fs.chmodSync(ENV_PATH, 0o600);
   console.log(`\nĐã ghi ${ENV_PATH} (quyền 600).`);
+  console.log('Muốn tinh chỉnh thêm (ngưỡng cảnh báo, múi giờ, giờ chạy tác vụ, giới hạn agent...): mở .env, kéo xuống phần "TUY BIEN NANG CAO".');
   console.log('Chạy thử:  npm start      |  chạy nền lâu dài: xem README mục "Chạy nền".\n');
   rl.close();
 })().catch(e => { console.error('Lỗi:', e.message); rl.close(); process.exit(1); });

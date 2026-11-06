@@ -10,18 +10,17 @@ const { mdToTelegramHtml } = require('./lib/telegram-md');
 const { stripInlineData, DEFAULT_IMAGE_PROMPT } = require('./lib/agent-image');
 const { createConfirmStore, confirmKeyboard, parseConfirmCallback } = require('./lib/agent-confirm');
 
+const { getSettings } = require('./config');
+const S = getSettings();
+const A = S.AGENT;
+
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 
 // Danh sach model du phong, uu tien tu tren xuong - da test that ngay 2026-09-15, con dung duoc.
 // Cac model cu (gemini-2.5-flash, gemini-2.5-flash-lite, gemini-2.0-flash) da 404 "no longer
 // available to new users" - KHONG dua vao danh sach nay. Quota free tier tinh RIENG theo tung
 // model (quotaId co "PerModel"), nen het quota 1 model van con dung duoc model khac.
-const MODEL_CANDIDATES = [...new Set([
-  process.env.GEMINI_MODEL || 'gemini-3.6-flash',
-  'gemini-3.5-flash',
-  'gemini-3-flash-preview',
-  'gemini-3.1-flash-lite',
-])];
+const MODEL_CANDIDATES = [...new Set([A.model, ...A.fallbackModels])]; // GEMINI_MODEL, roi GEMINI_FALLBACK_MODELS
 
 const WORKSPACE_DIR = path.join(__dirname, 'agent-workspace');
 const GEMINI_MD      = path.join(WORKSPACE_DIR, 'GEMINI.md');
@@ -34,21 +33,21 @@ const QUOTA_FILE     = path.join(LOGS_DIR, 'quota-counter.json');
 const REPORTS_DIR    = path.join(WORKSPACE_DIR, 'reports');
 
 // ─── Tunables ─────────────────────────────────────────────
-const MAX_TOOL_LOOPS          = 8;
-const MAX_UNATTENDED_LOOPS    = 12;
-const UNATTENDED_TIMEOUT_MS   = 5 * 60_000;
+const MAX_TOOL_LOOPS          = A.maxToolLoops;
+const MAX_UNATTENDED_LOOPS    = A.maxUnattendedLoops;
+const UNATTENDED_TIMEOUT_MS   = A.unattendedTimeoutMs;
 const TELEGRAM_TEXT_MAX       = 3800; // gioi han Telegram 4096, tru phan the HTML
-const REQUEST_TIMEOUT_MS      = 90_000;
+const REQUEST_TIMEOUT_MS      = A.requestTimeoutMs;
 const STALL_NOTICE_MS         = 12_000;
-const CONFIRM_TIMEOUT_MS      = 120_000;
-const SESSION_IDLE_ARCHIVE_MS = 48 * 3600 * 1000;
-const TRIM_LAST_TURNS         = 15; // so luot user-text gan nhat giu lai khi goi API, phan cu van con nguyen trong file session
+const CONFIRM_TIMEOUT_MS      = A.confirmTimeoutMs;
+const SESSION_IDLE_ARCHIVE_MS = A.sessionIdleMs;
+const TRIM_LAST_TURNS         = A.historyTurns; // so luot user-text gan nhat giu lai khi goi API, phan cu van con nguyen trong file session
 const INDEX_MAX_LINES         = 200;
 const AGENT_LOG_MAX_BYTES     = 5 * 1024 * 1024;
 // Han muc ngay chi de HIEN THI uoc tinh cho model CHUA tung dinh 429 that (khong dung de
 // quyet dinh logic that - callGeminiWithRetry chi dua vao 429 that tu Google). Suy ra tu
 // lan gemini-3.6-flash dinh 429 that voi quotaValue=20 (xem gemini-api-real-findings).
-const ASSUMED_DAILY_LIMIT_DISPLAY = 20;
+const ASSUMED_DAILY_LIMIT_DISPLAY = A.dailyLimitDisplay;
 
 const ai = GEMINI_API_KEY ? new GoogleGenAI({ apiKey: GEMINI_API_KEY }) : null;
 
@@ -742,8 +741,8 @@ function createAgent(deps) {
 
   function buildSystemInstruction() {
     const now = new Date();
-    const nowVN = now.toLocaleString('vi-VN', {
-      timeZone: 'Asia/Ho_Chi_Minh', weekday: 'long', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit',
+    const nowVN = now.toLocaleString(S.LOCALE, {
+      timeZone: S.TIMEZONE, weekday: 'long', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit',
     });
     const timeNote =
       `Thời điểm hiện tại: ${now.toISOString()} (ISO, UTC) — tức ${nowVN} giờ Việt Nam (UTC+7). ` +

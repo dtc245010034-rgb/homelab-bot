@@ -3,25 +3,22 @@ const path = require('path');
 const { execFile } = require('child_process');
 const axios = require('axios');
 const FormData = require('form-data');
-const { loadConfig } = require('./config');
+const { loadConfig, getSettings } = require('./config');
 const { captureSnapshot, recordClip } = require('./lib/camera');
 const { parseRmse, shouldAlert, createHealthTracker } = require('./lib/motion');
 const { redact } = require('./lib/redact');
 
 const { API, CHAT_ID, CAM_RTSP, CAM_MOTION_RTSP } = loadConfig();
 
-const THRESHOLD     = 6000;
-const COOLDOWN_MS   = 5 * 60 * 1000;
-const INTERVAL_MS   = 60 * 1000;
-const CLIP_SECONDS  = 10;
-const TRANSCODE     = process.env.MOTION_CLIP_TRANSCODE !== '0';
+const S = getSettings();
+const { threshold: THRESHOLD, cooldownMs: COOLDOWN_MS, intervalMs: INTERVAL_MS, clipSeconds: CLIP_SECONDS, transcode: TRANSCODE, failThreshold: FAIL_THRESHOLD } = S.MOTION;
 const STATE_FILE    = path.join(__dirname, '.motion-state');
 const COOLDOWN_FILE = '/tmp/motion-last-alert';
 const PREV = '/tmp/cam_prev.jpg';
 const CURR = '/tmp/cam_curr.jpg';
 const DIFF = '/tmp/cam_diff.jpg';
 
-const health = createHealthTracker({ failThreshold: 3 });
+const health = createHealthTracker({ failThreshold: FAIL_THRESHOLD });
 let busy = false; // chong chay chong lan neu 1 vong mat hon INTERVAL_MS
 
 async function notify(text) {
@@ -45,7 +42,7 @@ function readLastAlert() {
 
 async function sendAlert(rmse) {
   const clipPath = `/tmp/motion_clip_${Date.now()}.mp4`;
-  const timeStr  = new Date().toLocaleString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh' });
+  const timeStr  = new Date().toLocaleString(S.LOCALE, { timeZone: S.TIMEZONE });
   const caption  = `🚨 <b>Phát hiện chuyển động!</b>\n📅 ${timeStr}\n📊 RMSE: ${rmse.toFixed(0)}`;
   let videoSent = false;
 

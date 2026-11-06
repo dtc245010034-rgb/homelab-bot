@@ -115,3 +115,31 @@ test('pruneJobs: khong sua mang dau vao', () => {
   pruneJobs(input, NOW);
   assert.equal(input.length, 2);
 });
+
+test('buildSystemSeeds: doi gio tu cau hinh, giu nguyen thu neu khong chi dinh, off tat han', () => {
+  const { buildSystemSeeds } = require('../scheduler');
+  const seeds = buildSystemSeeds({
+    dailyDigest: { hour: 5, minute: 45 },
+    weekendReminder: { hour: 9, minute: 0, dayOfWeek: 0 },
+    weeklyReport: { off: true },
+  });
+  const by = a => seeds.find(s => s.action === a);
+  assert.deepEqual(by('dailyScheduleDigest').schedule, { kind: 'daily', hour: 5, minute: 45 });
+  assert.deepEqual(by('weekendPlanningReminder').schedule, { kind: 'weekly', dayOfWeek: 0, hour: 9, minute: 0 });
+  assert.equal(by('weeklyReport').off, true);
+  assert.equal(by('archiveAndResetWeek').schedule.hour, 0);
+  // Mang goc khong bi sua
+  assert.equal(SYSTEM_SEEDS.find(s => s.action === 'weeklyReport').off, undefined);
+  assert.equal(SYSTEM_SEEDS.find(s => s.action === 'dailyScheduleDigest').schedule.hour, 6);
+});
+
+test('reconcileSeeds: seed off -> job he thong inactive; bo off -> active lai', () => {
+  const now = new Date('2026-11-06T10:00:00');
+  const off = [{ action: 'weeklyReport', off: true, schedule: { kind: 'weekly', dayOfWeek: 1, hour: 8, minute: 0 } }];
+  const a = reconcileSeeds([], off, now);
+  assert.equal(a.jobs[0].active, false);
+  const on = [{ action: 'weeklyReport', schedule: { kind: 'weekly', dayOfWeek: 1, hour: 8, minute: 0 } }];
+  const b = reconcileSeeds(a.jobs, on, now);
+  assert.equal(b.changed, true);
+  assert.equal(b.jobs[0].active, true);
+});
