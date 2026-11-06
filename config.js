@@ -151,6 +151,10 @@ function getSettings(env = process.env) {
     AGENT: Object.freeze({
       model: env.GEMINI_MODEL || 'gemini-3.6-flash',
       fallbackModels: list(env.GEMINI_FALLBACK_MODELS, DEFAULT_MODELS),
+      // Model nhe cho viec nen (hen gio, tom tat phien) - thu truoc de danh quota model manh cho hoi dap. "off" = tat.
+      backgroundModel: /^off$/i.test(String(env.AGENT_BACKGROUND_MODEL || '').trim()) ? '' : (String(env.AGENT_BACKGROUND_MODEL || '').trim() || 'gemini-3.1-flash-lite'),
+      summarize: bool(env.AGENT_SUMMARIZE, true),
+      summaryMinTurns: num(env.AGENT_SUMMARY_MIN_TURNS, 3, { min: 1, max: 100, int: true }),
       maxToolLoops: num(env.AGENT_MAX_TOOL_LOOPS, 8, { min: 1, max: 30, int: true }),
       maxUnattendedLoops: num(env.AGENT_MAX_UNATTENDED_LOOPS, 12, { min: 1, max: 40, int: true }),
       unattendedTimeoutMs: num(env.AGENT_UNATTENDED_TIMEOUT_MIN, 5, { min: 1, max: 60 }) * 60_000,

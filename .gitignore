@@ -18,6 +18,7 @@ schedule/.rollover-in-progress
 
 # Bo nho dai han do agent tu ghi (co thong tin ca nhan) - repo nay public, khong commit
 agent-workspace/memory/
+agent-workspace/summaries/
 agent-workspace/GEMINI.md
 
 # File tam / sao luu / ket qua sinh ra khi chay

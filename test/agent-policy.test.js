@@ -85,3 +85,12 @@ test('nhiem vu tu dong khong co recall (bo nho ca nhan) va chi doc URL co san', 
   assert.ok(!isKnownUrl('not a url', seen));
   assert.deepEqual(extractUrls('(https://c.example/x),'), ['https://c.example/x']);
 });
+
+test('getBriefing / searchHistory: coi la du lieu ngoai; che do tu dong chi co getBriefing, khong co searchHistory', () => {
+  const { UNATTENDED_TOOLS, URL_SOURCES } = require('../lib/agent-policy');
+  for (const t of ['getBriefing', 'searchHistory']) assert.ok(UNTRUSTED_TOOLS.has(t), t);
+  assert.ok(UNATTENDED_TOOLS.has('getBriefing'));
+  assert.ok(!UNATTENDED_TOOLS.has('searchHistory'));
+  assert.ok(URL_SOURCES.has('getBriefing'));
+  assert.equal(callsIncludeUntrusted([{ name: 'searchHistory' }]), true);
+});

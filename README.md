@@ -35,6 +35,8 @@ Cách hoạt động:
 - **Tự đếm và tự làm mới theo ngày của Google.** Bộ đếm lưu ở `agent-workspace/logs/quota-counter.json` và đặt lại khi sang ngày theo giờ Mỹ (Pacific), tức khoảng 14:00 đến 15:00 giờ Việt Nam tuỳ mùa. Sau mốc đó model ưu tiên được dùng lại.
 - **Nhìn và chọn tay:** gõ `/agent quota` hoặc bấm nút **Model Gemini** trong `/help` để xem mỗi model đã dùng bao nhiêu, model nào đang chạy (⬅️), model nào đã hết, và bấm tên model để ép bot dùng model đó. Con số không có dấu `~` là Google báo thật, còn lại là bot tự đếm ước tính.
 - Nhiệm vụ định kỳ (như bản tin AI mỗi sáng) cũng dùng chung cơ chế này.
+- **Việc nền dùng model nhẹ trước.** Nhiệm vụ hẹn giờ và tóm tắt phiên thử `gemini-3.1-flash-lite` trước (đổi bằng `AGENT_BACKGROUND_MODEL`), để dành quota model chính cho lúc bạn hỏi trực tiếp. Hết quota model nhẹ thì mới sang các model còn lại.
+- **Biết quota đang đổ vào đâu.** `/agent quota` hiện thêm số lượt gọi hôm nay theo loại việc (hỏi đáp, hẹn giờ, tóm tắt phiên) và trung bình số lượt mỗi câu hỏi.
 
 Danh sách model nằm ở `MODEL_CANDIDATES` trong `agent.js`. Khi Google đổi hoặc gỡ model, chỉ cần sửa danh sách đó.
 
@@ -133,6 +135,8 @@ Quy tắc chung: bỏ trống hoặc xoá dòng thì dùng mặc định; giá t
 | | `MOTION_CLIP_SECONDS` (`10`), `MOTION_FAIL_THRESHOLD` (`3`), `MOTION_CLIP_TRANSCODE` (`1`) | Độ dài clip; số lần camera lỗi liên tiếp mới báo mất kết nối; mã hoá H.264 |
 | Agent: model | `GEMINI_FALLBACK_MODELS` (`gemini-3.5-flash,gemini-3-flash-preview,gemini-3.1-flash-lite`) | Chuỗi [xoay ca model](#điểm-nổi-bật-xoay-ca-model-gemini) sau `GEMINI_MODEL`. Sửa để thêm model mới hoặc đổi thứ tự |
 | | `AGENT_DAILY_LIMIT_DISPLAY` (`20`) | Hạn mức/ngày hiển thị trong `/agent quota` cho model chưa từng bị 429 (chỉ để hiển thị) |
+| | `AGENT_BACKGROUND_MODEL` (`gemini-3.1-flash-lite`) | Model nhẹ thử trước cho nhiệm vụ hẹn giờ và tóm tắt phiên. Phải nằm trong chuỗi model ở trên; `off` để tắt |
+| | `AGENT_SUMMARIZE` (`1`), `AGENT_SUMMARY_MIN_TURNS` (`3`) | Tóm tắt phiên khi lưu trữ; chỉ tóm tắt phiên có ít nhất số câu hỏi này |
 | Agent: giới hạn | `AGENT_MAX_TOOL_LOOPS` (`8`), `AGENT_MAX_UNATTENDED_LOOPS` (`12`), `AGENT_UNATTENDED_TIMEOUT_MIN` (`5`) | Số lượt gọi công cụ tối đa mỗi câu hỏi; mỗi tác vụ hẹn giờ; thời gian tối đa của tác vụ hẹn giờ |
 | | `AGENT_REQUEST_TIMEOUT_SEC` (`90`), `AGENT_CONFIRM_TIMEOUT_SEC` (`120`) | Chờ Gemini trả lời; chờ bạn bấm Đồng ý/Huỷ |
 | | `AGENT_SESSION_IDLE_HOURS` (`48`), `AGENT_HISTORY_TURNS` (`15`), `AGENT_KEEP_REPORTS` (`30`) | Nghỉ bao lâu thì cắt phiên trò chuyện; số lượt gần nhất gửi kèm mỗi lần gọi; số báo cáo Word giữ lại |
@@ -159,6 +163,11 @@ Gửi **kèm ảnh** thời khoá biểu với caption `/agent ...` để agent 
 
 Các lệnh khác: `/agent quota` xem quota Gemini, `/new` bắt đầu cuộc hội thoại mới.
 
+**Tiết kiệm lượt gọi, nhớ lại chuyện cũ**
+- Công cụ gộp `getBriefing` lấy thời tiết, tin tức, lịch tuần, nhắc việc, trạng thái server trong **một** lần gọi, nên câu như "tóm tắt buổi sáng" chỉ tốn ít lượt hơn.
+- `/agent hôm kia mình hỏi gì về router?`: agent tìm lại trong các cuộc trò chuyện cũ bằng file trên máy, **không tốn quota**.
+- Khi một phiên được lưu trữ (im lặng quá 48 giờ hoặc `/new`), bot nhờ Gemini tóm tắt phiên đó thành vài dòng, chạy nền, tốn đúng 1 lượt gọi và chỉ với phiên có từ 3 câu hỏi. Bản tóm tắt nằm ở `agent-workspace/summaries/` và cũng không được đưa lên git. Tắt bằng `AGENT_SUMMARIZE=0`.
+
 **Hai loại việc hẹn giờ**
 - **Nhắc việc**: đến giờ chỉ gửi đúng đoạn chữ bạn đặt và ghim lại. Không chạy AI.
 - **Nhiệm vụ định kỳ**: đến giờ agent tự tìm tin, đọc bài, tóm tắt rồi gửi kết quả. Mỗi lần chạy tốn vài đến chục yêu cầu Gemini nên hãy đặt ít thôi.
@@ -167,7 +176,7 @@ Các lệnh khác: `/agent quota` xem quota Gemini, `/new` bắt đầu cuộc h
 - Mọi thao tác thay đổi dữ liệu (xoá lịch, đặt nhắc, ghi nhớ...) đều hiện nút **Xác nhận / Huỷ** trước khi thực hiện.
 - Sau khi đọc nội dung web, agent bị buộc xác nhận trước mọi thao tác có tác động, để trang web độc hại không điều khiển được bot.
 - Công cụ đọc web chặn địa chỉ nội bộ (LAN, localhost), nên không bị lợi dụng để truy cập router hay camera của bạn.
-- Nhiệm vụ chạy tự động chỉ được dùng một danh sách công cụ đọc-và-báo-cáo, không thể xoá hay sửa gì, không đọc được bộ nhớ cá nhân, và chỉ được mở những link xuất hiện trong kết quả tin tức/tìm kiếm của chính lần chạy đó (chống trang web độc hại bắt bot gửi dữ liệu ra ngoài qua URL).
+- Nhiệm vụ chạy tự động chỉ được dùng một danh sách công cụ đọc-và-báo-cáo, không thể xoá hay sửa gì, không đọc được bộ nhớ cá nhân, lịch hay hội thoại cũ (`getBriefing` ở chế độ này chỉ lấy thời tiết và tin), và chỉ được mở những link xuất hiện trong kết quả tin tức/tìm kiếm của chính lần chạy đó (chống trang web độc hại bắt bot gửi dữ liệu ra ngoài qua URL).
 - Trong hội thoại, nếu agent muốn mở một link lạ sau khi đã đọc nội dung web, bot hỏi xác nhận trước.
 - Agent không chạy được lệnh hệ thống tự do.
 

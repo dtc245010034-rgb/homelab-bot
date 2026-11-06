@@ -91,6 +91,9 @@ test('getSettings: khong cau hinh gi -> mac dinh nhu truoc khi co tuy bien', () 
   assert.equal(s.AGENT.maxToolLoops, 8);
   assert.equal(s.AGENT.requestTimeoutMs, 90_000);
   assert.equal(s.AGENT.sessionIdleMs, 48 * 3600_000);
+  assert.equal(s.AGENT.backgroundModel, 'gemini-3.1-flash-lite');
+  assert.equal(s.AGENT.summarize, true);
+  assert.equal(s.AGENT.summaryMinTurns, 3);
   assert.equal(s.PIHOLE.url, 'http://localhost');
   assert.equal(s.DISK_MOUNT, '/');
   assert.deepEqual([...s.MORNING.sections].sort(), ['map', 'news', 'stocks', 'weather']);
@@ -181,4 +184,13 @@ test('moi bien getSettings doc deu co mat trong .env.example (khong sot bien nao
   const example = fs.readFileSync(path.join(__dirname, '..', '.env.example'), 'utf8');
   const missing = [...new Set(used)].filter(k => k !== 'TZ' && !new RegExp(`^#?${k}=`, 'm').test(example));
   assert.deepEqual(missing, []);
+});
+
+test('getSettings: AGENT_BACKGROUND_MODEL doi duoc, "off" tat, AGENT_SUMMARIZE=0 tat tom tat', () => {
+  assert.equal(getSettings({ AGENT_BACKGROUND_MODEL: 'm9' }).AGENT.backgroundModel, 'm9');
+  assert.equal(getSettings({ AGENT_BACKGROUND_MODEL: 'OFF' }).AGENT.backgroundModel, '');
+  assert.equal(getSettings({ AGENT_BACKGROUND_MODEL: '  ' }).AGENT.backgroundModel, 'gemini-3.1-flash-lite');
+  const s = getSettings({ AGENT_SUMMARIZE: '0', AGENT_SUMMARY_MIN_TURNS: '5' });
+  assert.equal(s.AGENT.summarize, false);
+  assert.equal(s.AGENT.summaryMinTurns, 5);
 });
