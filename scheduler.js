@@ -3,22 +3,7 @@ const crypto = require('crypto');
 const fsutil = require('./fsutil');
 
 const SCHEDULER_DIR = path.join(__dirname, 'scheduler');
-const JOBS_FILE      = path.join(SCHEDULER_DIR, 'jobs.json');
-const PIN_STATE_FILE = path.join(SCHEDULER_DIR, 'pin-state.json');
 const TICK_MS        = 45_000;
-
-function ensureSchedulerDir() {
-  fsutil.ensureDirs([SCHEDULER_DIR]);
-}
-
-function loadJobs() {
-  return fsutil.readJsonSafe(JOBS_FILE, []) || [];
-}
-
-function saveJobs(jobs) {
-  ensureSchedulerDir();
-  fsutil.writeJsonAtomic(JOBS_FILE, jobs);
-}
 
 // Hàm thuần - nhận `now` tường minh để test không cần chờ thời gian thật.
 // QUAN TRỌNG: `now` luôn phải là thời điểm THỰC tại lúc gọi (tạo job, hoặc job vừa bắn xong),
@@ -98,27 +83,43 @@ function pruneJobs(jobs, now, keepDays = 7) {
   return { jobs: kept, removed: jobs.length - kept.length };
 }
 
-function createScheduler({ send, systemActions, pinMessage, unpinMessage }) {
+// Loai job nguoi dung tao: 'message' (gui chu + ghim) va 'agentTask' (den gio chay agent voi `prompt`).
+const USER_JOB_TYPES = new Set(['message', 'agentTask']);
+
+function createScheduler({ send, systemActions, pinMessage, unpinMessage, runAgentTask, dir = SCHEDULER_DIR }) {
+  // `dir` chi de test dung thu muc tam, khong dung vao jobs.json that.
+  const jobsFile = path.join(dir, 'jobs.json');
+  const pinFile = path.join(dir, 'pin-state.json');
+  const loadJobs = () => fsutil.readJsonSafe(jobsFile, []) || [];
+  const saveJobs = (jobs) => { fsutil.ensureDirs([dir]); fsutil.writeJsonAtomic(jobsFile, jobs); };
+
+  // agentTask co the chay vai phut, lau hon TICK_MS: neu khong danh dau, tick ke tiep thay job van "den han" va ban lai.
+  const inFlight = new Set();
+
   async function tick() {
     const now = Date.now();
     const jobs = loadJobs();
     const due = jobs
-      .filter(j => j.active && new Date(j.nextFireAt).getTime() <= now)
+      .filter(j => j.active && !inFlight.has(j.id) && new Date(j.nextFireAt).getTime() <= now)
       .sort((a, b) => new Date(a.nextFireAt) - new Date(b.nextFireAt));
 
     for (const job of due) {
       let ok = false;
+      inFlight.add(job.id);
       try {
         if (job.type === 'message') {
           const messageId = await send(job.chatId, job.message);
           if (pinMessage && messageId) {
-            const pinState = fsutil.readJsonSafe(PIN_STATE_FILE, null);
+            const pinState = fsutil.readJsonSafe(pinFile, null);
             if (pinState && pinState.chatId === job.chatId && pinState.messageId) {
               await unpinMessage(job.chatId, pinState.messageId);
             }
             await pinMessage(job.chatId, messageId);
-            fsutil.writeJsonAtomic(PIN_STATE_FILE, { chatId: job.chatId, messageId });
+            fsutil.writeJsonAtomic(pinFile, { chatId: job.chatId, messageId });
           }
+        } else if (job.type === 'agentTask') {
+          if (!runAgentTask) throw new Error('chưa cấu hình runAgentTask');
+          await runAgentTask(job);
         } else if (job.type === 'system') {
           const fn = systemActions[job.action];
           if (fn) await fn(job);
@@ -128,6 +129,8 @@ function createScheduler({ send, systemActions, pinMessage, unpinMessage }) {
         console.log(`[scheduler] fired ${job.id} (${job.action || job.type})`);
       } catch (e) {
         console.error(`[scheduler] job ${job.id} (${job.action || job.type}) failed:`, e.message);
+      } finally {
+        inFlight.delete(job.id);
       }
 
       const fresh = loadJobs();
@@ -145,7 +148,7 @@ function createScheduler({ send, systemActions, pinMessage, unpinMessage }) {
   }
 
   function start() {
-    ensureSchedulerDir();
+    fsutil.ensureDirs([dir]);
     for (const s of SYSTEM_SEEDS) {
       if (!systemActions[s.action]) console.error(`[scheduler] seed "${s.action}" chưa có handler trong systemActions`);
     }
@@ -160,13 +163,14 @@ function createScheduler({ send, systemActions, pinMessage, unpinMessage }) {
     }, TICK_MS);
   }
 
-  function addJob({ chatId, type, message, action, schedule }) {
+  function addJob({ chatId, type, message, prompt, action, schedule }) {
     const jobs = loadJobs();
     const job = {
       id: crypto.randomUUID().slice(0, 8),
       chatId,
       type,
       message,
+      ...(prompt ? { prompt } : {}),
       action,
       schedule,
       nextFireAt: computeNextFireAt(schedule, new Date()).toISOString(),
@@ -179,12 +183,12 @@ function createScheduler({ send, systemActions, pinMessage, unpinMessage }) {
   }
 
   function listJobs(chatId) {
-    return loadJobs().filter(j => j.active && j.type === 'message' && j.chatId === chatId);
+    return loadJobs().filter(j => j.active && USER_JOB_TYPES.has(j.type) && j.chatId === chatId);
   }
 
   function cancelJob(id) {
     const jobs = loadJobs();
-    const idx = jobs.findIndex(j => j.id === id && j.type === 'message');
+    const idx = jobs.findIndex(j => j.id === id && USER_JOB_TYPES.has(j.type));
     if (idx === -1) return false;
     jobs[idx].active = false;
     saveJobs(jobs);
@@ -194,4 +198,4 @@ function createScheduler({ send, systemActions, pinMessage, unpinMessage }) {
   return { start, addJob, listJobs, cancelJob, tick };
 }
 
-module.exports = { createScheduler, computeNextFireAt, SYSTEM_SEEDS, reconcileSeeds, pruneJobs };
+module.exports = { USER_JOB_TYPES, createScheduler, computeNextFireAt, SYSTEM_SEEDS, reconcileSeeds, pruneJobs };

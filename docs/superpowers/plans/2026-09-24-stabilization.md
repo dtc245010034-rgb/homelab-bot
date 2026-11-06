@@ -563,7 +563,7 @@ const { sendMorningReport, getETFPrice, getWeather, getRSS } = require('./mornin
 ...
 const TOKEN         = process.env.TELEGRAM_BOT_TOKEN;
 const ALLOWED_CHAT  = <CHAT_ID>;
-const MAC_ADDRESS   = 'F4:B5:20:50:F1:D5';
+const MAC_ADDRESS   = 'AA:BB:CC:DD:EE:FF';
 const MAIN_PC_IP    = '192.168.1.62';
 const API           = `https://api.telegram.org/bot${TOKEN}`;
 const PIHOLE_SECRET = path.join(os.homedir(), 'homelab-bot', '.pihole-secret');
@@ -581,7 +581,7 @@ const { captureSnapshot, CameraError } = require('./lib/camera');
 và thay 3 hằng số lấy từ env bằng:
 ```js
 const { API, CHAT_ID: ALLOWED_CHAT, CAM_RTSP, CAM_HOST, OWM_KEY } = loadConfig();
-const MAC_ADDRESS   = 'F4:B5:20:50:F1:D5';
+const MAC_ADDRESS   = 'AA:BB:CC:DD:EE:FF';
 const MAIN_PC_IP    = '192.168.1.62';
 const PIHOLE_SECRET = path.join(os.homedir(), 'homelab-bot', '.pihole-secret');
 const MOTION_STATE  = path.join(__dirname, '.motion-state');

@@ -61,3 +61,16 @@ test('hostOf: co/khong userinfo, cong, va gia tri rac', () => {
 test('config tra ve object dong bang', () => {
   assert.ok(Object.isFrozen(loadConfig(base)));
 });
+
+test('KNOWN_DEVICES, MAIN_PC va broadcast duoc doc tu env', () => {
+  const { parseDevices, broadcastOf, getLocation } = require('../config');
+  assert.deepEqual(parseDevices('192.168.1.1=Router;192.168.1.5= NAS '), { '192.168.1.1': 'Router', '192.168.1.5': 'NAS' });
+  assert.equal(broadcastOf('192.168.1.62'), '192.168.1.255');
+  assert.equal(broadcastOf(undefined), '255.255.255.255');
+  const c = loadConfig({ TELEGRAM_BOT_TOKEN: 't', ALLOWED_CHAT_ID: '1', MAIN_PC_IP: '10.0.0.7', MAIN_PC_MAC: 'AA:BB:CC:DD:EE:FF' });
+  assert.equal(c.WOL_BROADCAST, '10.0.0.255');
+  assert.equal(c.MAIN_PC_MAC, 'AA:BB:CC:DD:EE:FF');
+  assert.deepEqual(getLocation({}), { name: 'Hà Nội', lat: 21.0278, lon: 105.8342 });
+  assert.deepEqual(getLocation({ LOCATION_NAME: 'Huế', LOCATION_LAT: '16.46', LOCATION_LON: '107.59' }), { name: 'Huế', lat: 16.46, lon: 107.59 });
+  assert.equal(getLocation({ LOCATION_LAT: 'abc', LOCATION_LON: '1' }).name, 'Hà Nội');
+});

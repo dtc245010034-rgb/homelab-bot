@@ -55,13 +55,16 @@ const LAYERS = {
   temp: 'temp_new',
 };
 
+const LOCATION = require('./config').getLocation();
+
 // [lonMin, latMin, lonMax, latMax] — phủ toàn VN + Biển Đông
 const PRESETS = {
   vn: { bbox: [100, 5, 120, 24], zoom: 5, label: 'Việt Nam + Biển Đông' },
-  tn: { center: [21.5928, 105.8442], zoom: 9, radius: 1, label: 'Thái Nguyên' },
+  // 'tn' = khu vuc cua ban (LOCATION_* trong .env); giu khoa 'tn' de khong doi callback cu
+  tn: { center: [LOCATION.lat, LOCATION.lon], zoom: 9, radius: 1, label: LOCATION.name },
 };
 
-const THAI_NGUYEN = [21.5928, 105.8442];
+const HOME = [LOCATION.lat, LOCATION.lon];
 
 function lon2tileX(lon, z) {
   return Math.floor(((lon + 180) / 360) * Math.pow(2, z));
@@ -177,7 +180,7 @@ async function generateWeatherMap(presetKey = 'vn', layerKey = 'rain', apiKey) {
       x2 = lon2tileX(lonMax, zoom);
       y1 = lat2tileY(latMax, zoom); // vĩ độ lớn hơn -> tile y nhỏ hơn
       y2 = lat2tileY(latMin, zoom);
-      markerLatLon = THAI_NGUYEN;
+      markerLatLon = HOME;
     } else {
       zoom = preset.zoom;
       const [lat, lon] = preset.center;

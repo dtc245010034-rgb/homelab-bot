@@ -60,3 +60,15 @@ test('clampIndex: dai hon -> giu phan duoi, cat o ranh gioi dong, co dong danh d
   assert.ok(!out.includes('topic-0)'));  // dong cu nhat da rot
   for (const l of out.split('\n').slice(1)) assert.match(l, /^- \[topic-\d+\]/); // khong dong nao bi cat doi
 });
+
+test('tool moi doc noi dung web deu nam trong danh sach khong tin cay', () => {
+  for (const t of ['getAiNews', 'searchNews', 'fetchUrl']) assert.ok(UNTRUSTED_TOOLS.has(t), t);
+});
+
+test('UNATTENDED_TOOLS: khong co tool sua lich/nhac viec/ghi nho, chi doc + createReport', () => {
+  const { UNATTENDED_TOOLS } = require('../lib/agent-policy');
+  for (const t of ['setReminder', 'scheduleAgentTask', 'cancelReminder', 'addScheduleItem', 'clearSchedule', 'removeScheduleItem', 'editScheduleItem', 'remember', 'forget']) {
+    assert.ok(!UNATTENDED_TOOLS.has(t), t);
+  }
+  for (const t of ['getAiNews', 'searchNews', 'fetchUrl', 'createReport']) assert.ok(UNATTENDED_TOOLS.has(t), t);
+});

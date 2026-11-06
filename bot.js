@@ -25,10 +25,8 @@ const execAsync = util.promisify(exec);
 const run = createDetacher(); // lenh cham chay nen, khong chan vong poll Telegram
 
 // ─── Config ───────────────────────────────────────────────
-const { API, TOKEN, CHAT_ID: ALLOWED_CHAT, CAM_RTSP, CAM_HOST, OWM_KEY } = loadConfig();
-const MAC_ADDRESS   = 'F4:B5:20:50:F1:D5';
-const MAIN_PC_IP    = '192.168.1.62';
-const PIHOLE_SECRET = path.join(os.homedir(), 'homelab-bot', '.pihole-secret');
+const { API, TOKEN, CHAT_ID: ALLOWED_CHAT, CAM_RTSP, CAM_HOST, OWM_KEY, MAIN_PC_IP, MAIN_PC_MAC: MAC_ADDRESS, WOL_BROADCAST, KNOWN_DEVICES, LOCATION } = loadConfig();
+const PIHOLE_SECRET = path.join(__dirname, '.pihole-secret');
 const MOTION_STATE  = path.join(__dirname, '.motion-state');
 const CAM_SNAP      = '/tmp/cam_snap.jpg';
 
@@ -364,9 +362,8 @@ async function handleNetscan(chatId, msgId = null) {
     const validLines = lines.filter(l => !l.includes('FAILED') && l.includes('dev'));
 
     const knownMap = {
-      '192.168.1.1': 'Router / Gateway',
-      '192.168.1.2': 'Server (Self)',
-      '192.168.1.62': 'PC Chính',
+      ...(MAIN_PC_IP ? { [MAIN_PC_IP]: 'PC Chính' } : {}),
+      ...KNOWN_DEVICES,
       ...(CAM_HOST ? { [CAM_HOST]: 'Hikvision Camera' } : {}),
     };
 
@@ -490,6 +487,7 @@ async function handleCleanup(chatId, msgId = null) {
 
 // ─── /ping (Main PC) ──────────────────────────────────────
 async function handlePing(chatId, msgId = null) {
+  if (!MAIN_PC_IP) return render(chatId, '<b>CHƯA CẤU HÌNH</b>\n<blockquote>Đặt <code>MAIN_PC_IP</code> trong <code>.env</code> để dùng lệnh này.</blockquote>', null, msgId);
   try {
     const res = await ping.promise.probe(MAIN_PC_IP, { timeout: 3 });
     const isOnline = res.alive;
@@ -522,6 +520,7 @@ async function handlePing(chatId, msgId = null) {
 
 // ─── /wol (Main PC) ───────────────────────────────────────
 async function handleWol(chatId, force = false, msgId = null) {
+  if (!MAC_ADDRESS) return render(chatId, '<b>CHƯA CẤU HÌNH</b>\n<blockquote>Đặt <code>MAIN_PC_MAC</code> (và <code>MAIN_PC_IP</code>) trong <code>.env</code> để dùng Wake-on-LAN.</blockquote>', null, msgId);
   try {
     if (!force) {
       const check = await ping.promise.probe(MAIN_PC_IP, { timeout: 2 });
@@ -537,12 +536,12 @@ async function handleWol(chatId, force = false, msgId = null) {
         return;
       }
     }
-    await wol(MAC_ADDRESS, { address: '192.168.1.255' });
+    await wol(MAC_ADDRESS, { address: WOL_BROADCAST });
     const text =
       `<b>ĐÃ PHÁT GÓI TIN WAKE-ON-LAN</b>\n` +
       `<blockquote>` +
       `▸ <b>Target MAC:</b> <code>${MAC_ADDRESS}</code>\n` +
-      `▸ <b>Broadcast IP:</b> <code>192.168.1.255</code>\n` +
+      `▸ <b>Broadcast IP:</b> <code>${WOL_BROADCAST}</code>\n` +
       `▸ <b>Trạng thái:</b> Magic packet đã gửi (chờ máy khởi động ~30-60s)` +
       `</blockquote>`;
 
@@ -624,8 +623,8 @@ async function handleWmap(chatId, args = [], msgId = null) {
         { text: '💨 Gió VN', callback_data: 'wmap_vn_wind' }
       ],
       [
-        { text: '🌧️ Mưa Thái Nguyên', callback_data: 'wmap_tn_rain' },
-        { text: '🌡️ Nhiệt độ TN', callback_data: 'wmap_tn_temp' }
+        { text: `🌧️ Mưa ${LOCATION.name}`, callback_data: 'wmap_tn_rain' },
+        { text: '🌡️ Nhiệt độ', callback_data: 'wmap_tn_temp' }
       ],
       [{ text: '◀ Menu chính', callback_data: 'cmd_help' }]
     ];
@@ -725,7 +724,7 @@ async function handlePihole(chatId, args = [], msgId = null) {
 // ─── /weekly ──────────────────────────────────────────────
 async function handleWeekly(chatId, msgId = null) {
   try {
-    const LOG_FILE = path.join(os.homedir(), 'homelab-bot', 'pihole-weekly.json');
+    const LOG_FILE = path.join(__dirname, 'pihole-weekly.json');
     const [cpu, mem, disks, time] = await Promise.all([
       si.currentLoad(), si.mem(), si.fsSize(), si.time()
     ]);
@@ -873,9 +872,9 @@ async function handleHelp(chatId, msgId = null) {
   ];
 
   const text =
-    `<b>BẢNG ĐIỀU KHIỂN HOMELAB v2.1</b>\n` +
+    `<b>BẢNG ĐIỀU KHIỂN HOMELAB v${require('./package.json').version}</b>\n` +
     `<blockquote>` +
-    `▸ <b>Host:</b> <code>Laptop Server HP (N5030)</code>\n` +
+    `▸ <b>Host:</b> <code>${(process.env.HOST_NAME || os.hostname()).replace(/[&<>]/g, '')}</code>\n` +
     `▸ <b>Trạng thái:</b> <code>[HOẠT ĐỘNG BÌNH THƯỜNG]</code>\n` +
     `▸ <b>Giao diện:</b> Modern Card Blockquote` +
     `</blockquote>\n\n` +
@@ -909,7 +908,8 @@ const systemActions = {
   },
 };
 
-const schedulerApi = createScheduler({ send, systemActions, pinMessage, unpinMessage });
+// agentApi tao SAU scheduler (agent can schedulerApi.addJob) nen goi qua closure; chi duoc dung khi tick, luc do da khoi tao xong.
+const schedulerApi = createScheduler({ send, systemActions, pinMessage, unpinMessage, runAgentTask: (job) => agentApi.runScheduledTask(job) });
 schedulerApi.start();
 
 const agentApi = createAgent({

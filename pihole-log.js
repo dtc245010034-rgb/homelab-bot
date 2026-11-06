@@ -1,9 +1,9 @@
 const axios = require('axios');
 const fs    = require('fs');
-const os    = require('os');
+const path  = require('path');
 
-const PIHOLE_SECRET = os.homedir() + '/homelab-bot/.pihole-secret';
-const LOG_FILE      = os.homedir() + '/homelab-bot/pihole-weekly.json';
+const PIHOLE_SECRET = path.join(__dirname, '.pihole-secret');
+const LOG_FILE      = path.join(__dirname, 'pihole-weekly.json');
 
 async function saveDailySnapshot() {
   try {

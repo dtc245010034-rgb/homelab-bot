@@ -1,22 +1,13 @@
 require('dotenv').config({ path: __dirname + '/.env' });
 const axios  = require('axios');
-const xml2js = require('xml2js');
 const fs     = require('fs');
 const FormData = require('form-data');
 const { generateWeatherMap } = require('./wmap');
+const { getRSS } = require('./lib/rss');
 
 // ─── Config ───────────────────────────────────────────────
 const { CHAT_ID, OWM_KEY, API } = require('./config').loadConfig();
-const THAI_NGUYEN  = { lat: 21.5942, lon: 105.8412, name: 'Thái Nguyên' };
-
-// ─── RSS Sources ──────────────────────────────────────────
-const RSS_FEEDS = [
-  { name: 'Hacker News',  url: 'https://news.ycombinator.com/rss',         max: 2 },
-  { name: 'VnExpress KD', url: 'https://vnexpress.net/rss/kinh-doanh.rss', max: 2 },
-  { name: 'CafeBiz',      url: 'https://cafebiz.vn/rss/cong-nghe.rss',     max: 2 },
-  { name: 'VnEconomy',    url: 'https://vneconomy.vn/kinh-te-so.rss',      max: 2 },
-  { name: 'dev.to',       url: 'https://dev.to/feed',                      max: 1 }
-];
+const THAI_NGUYEN  = require('./config').getLocation(); // ten cu giu nguyen de khong sua nhieu cho; gia tri lay tu LOCATION_* trong .env
 
 // ─── Helpers ──────────────────────────────────────────────
 async function send(text) {
@@ -112,38 +103,6 @@ async function getWeather() {
   } catch (e) {
     return `▸ <code>Lỗi thời tiết: ${e.message}</code>`;
   }
-}
-
-// ─── RSS ──────────────────────────────────────────────────
-async function getRSS() {
-  const parser = new xml2js.Parser({ explicitArray: false });
-  const blocks = [];
-
-  for (const feed of RSS_FEEDS) {
-    try {
-      const { data } = await axios.get(feed.url, {
-        timeout: 8000,
-        headers: { 'User-Agent': 'Mozilla/5.0' }
-      });
-      const result = await parser.parseStringPromise(data);
-      const items  = result.rss?.channel?.item || [];
-      const list   = Array.isArray(items) ? items : [items];
-
-      const itemLines = [];
-      list.slice(0, feed.max).forEach(item => {
-        const title = item.title?.replace(/<[^>]+>/g, '').trim() || '(no title)';
-        const link  = item.link || item.guid || '#';
-        itemLines.push(`  • <a href="${link}">${title}</a>`);
-      });
-
-      if (itemLines.length > 0) {
-        blocks.push(`<b>${feed.name}</b>\n` + itemLines.join('\n'));
-      }
-    } catch {
-      blocks.push(`<b>${feed.name}</b>\n  • <i>(Không tải được feed)</i>`);
-    }
-  }
-  return blocks.join('\n\n');
 }
 
 // ─── Main Report ──────────────────────────────────────────

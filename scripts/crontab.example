@@ -1,0 +1,7 @@
+# homelab-bot - cron mau. Thay __DIR__ bang duong dan thu muc cai bot (README co lenh sed san).
+# Bao cao ngay 07:30, 12:00, 20:00 (can OWM_API_KEY neu muon co thoi tiet)
+30 7  * * * cd __DIR__ && node morning.js >> __DIR__/morning.log 2>&1
+0  12 * * * cd __DIR__ && node morning.js >> __DIR__/morning.log 2>&1
+0  20 * * * cd __DIR__ && node morning.js >> __DIR__/morning.log 2>&1
+# Luu thong ke Pi-hole moi ngay (chi can neu dung Pi-hole)
+59 23 * * * cd __DIR__ && node pihole-log.js >> __DIR__/pihole-log.log 2>&1
