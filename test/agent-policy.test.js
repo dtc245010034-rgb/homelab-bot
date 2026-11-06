@@ -72,3 +72,16 @@ test('UNATTENDED_TOOLS: khong co tool sua lich/nhac viec/ghi nho, chi doc + crea
   }
   for (const t of ['getAiNews', 'searchNews', 'fetchUrl', 'createReport']) assert.ok(UNATTENDED_TOOLS.has(t), t);
 });
+
+test('nhiem vu tu dong khong co recall (bo nho ca nhan) va chi doc URL co san', () => {
+  const { UNATTENDED_TOOLS, URL_SOURCES, makeSeen, isKnownUrl, extractUrls } = require('../lib/agent-policy');
+  assert.ok(!UNATTENDED_TOOLS.has('recall'));
+  assert.ok(URL_SOURCES.has('searchNews') && !URL_SOURCES.has('fetchUrl'));
+  const seen = makeSeen('doc https://a.example/p?x=1.', { items: [{ link: 'https://b.example/news/2' }] });
+  assert.ok(isKnownUrl('https://a.example/p?x=1', seen));
+  assert.ok(isKnownUrl('https://b.example/news/2', seen));
+  assert.ok(!isKnownUrl('https://evil.example/?d=secret', seen));
+  assert.ok(!isKnownUrl('https://a.example/p?x=1&d=secret', seen)); // them du lieu vao URL la bi chan
+  assert.ok(!isKnownUrl('not a url', seen));
+  assert.deepEqual(extractUrls('(https://c.example/x),'), ['https://c.example/x']);
+});

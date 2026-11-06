@@ -118,7 +118,8 @@ Các lệnh khác: `/agent quota` xem quota Gemini, `/new` bắt đầu cuộc h
 - Mọi thao tác thay đổi dữ liệu (xoá lịch, đặt nhắc, ghi nhớ...) đều hiện nút **Xác nhận / Huỷ** trước khi thực hiện.
 - Sau khi đọc nội dung web, agent bị buộc xác nhận trước mọi thao tác có tác động, để trang web độc hại không điều khiển được bot.
 - Công cụ đọc web chặn địa chỉ nội bộ (LAN, localhost), nên không bị lợi dụng để truy cập router hay camera của bạn.
-- Nhiệm vụ chạy tự động chỉ được dùng một danh sách công cụ đọc-và-báo-cáo, không thể xoá hay sửa gì.
+- Nhiệm vụ chạy tự động chỉ được dùng một danh sách công cụ đọc-và-báo-cáo, không thể xoá hay sửa gì, không đọc được bộ nhớ cá nhân, và chỉ được mở những link xuất hiện trong kết quả tin tức/tìm kiếm của chính lần chạy đó (chống trang web độc hại bắt bot gửi dữ liệu ra ngoài qua URL).
+- Trong hội thoại, nếu agent muốn mở một link lạ sau khi đã đọc nội dung web, bot hỏi xác nhận trước.
 - Agent không chạy được lệnh hệ thống tự do.
 
 **Bộ nhớ dài hạn** nằm ở `agent-workspace/memory/` (file Markdown, bạn đọc và sửa được). Thư mục này và lịch sử hội thoại **không** được đưa lên git.

@@ -2,7 +2,7 @@ const fs = require('fs');
 const path = require('path');
 const { GoogleGenAI, createPartFromFunctionResponse } = require('@google/genai');
 const fsutil = require('./fsutil');
-const { hasUntrustedResult, callsIncludeUntrusted, needsConfirm, clampIndex, UNATTENDED_TOOLS } = require('./lib/agent-policy');
+const { hasUntrustedResult, callsIncludeUntrusted, needsConfirm, clampIndex, UNATTENDED_TOOLS, URL_SOURCES, makeSeen, isKnownUrl } = require('./lib/agent-policy');
 const rssLib = require('./lib/rss');
 const webToolsLib = require('./lib/web-tools');
 const reportLib = require('./lib/report-docx');
@@ -781,17 +781,28 @@ function createAgent(deps) {
     return true;
   }
 
-  async function dispatchTool(chatId, call, tainted = false, taintSource = 'web') {
+  async function dispatchTool(chatId, call, tainted = false, taintSource = 'web', prov = null) {
     const tool = TOOLS[call.name];
     if (!tool) {
       logToolCall({ chatId, tool: call.name, ok: false, error: 'unknown tool' });
       return { error: `Tool "${call.name}" không tồn tại.` };
     }
-    if (needsConfirm(tool, tainted)) {
+    // fetchUrl chi doc URL da co trong yeu cau / ket qua tin-tim kiem; URL "la" sau khi doc web -> khong tu y di (nhiem vu tu dong) hoac phai xac nhan (hoi thoai).
+    let unknownUrl = false;
+    if (call.name === 'fetchUrl' && prov && !isKnownUrl(call.args?.url, prov.seen)) {
+      if (prov.unattended) {
+        logToolCall({ chatId, tool: call.name, args: call.args, ok: false, reason: 'url-not-from-results' });
+        return { error: 'Chỉ được đọc các link nằm trong kết quả tin tức/tìm kiếm của lần chạy này.' };
+      }
+      unknownUrl = tainted;
+    }
+    if (unknownUrl || needsConfirm(tool, tainted)) {
       const why = taintSource === 'image' ? 'Thông tin lấy từ ảnh (có thể đọc sai)' : 'Vừa đọc nội dung từ web';
       let desc;
       try {
-        const base = tool.describeAction ? await tool.describeAction(call.args || {}) : `Thực thi "${call.name}"`;
+        const base = tool.describeAction ? await tool.describeAction(call.args || {})
+          : unknownUrl ? `Mở link không nằm trong kết quả tin tức: ${escapeHtml(String(call.args?.url).slice(0, 200))}`
+          : `Thực thi "${call.name}"`;
         desc = (tainted && !tool.requiresConfirm) ? `⚠️ ${why} nên cần xác nhận. ${base}` : base;
       } catch (e) {
         logToolCall({ chatId, tool: call.name, args: call.args, ok: false, reason: 'invalid-target', error: e.message });
@@ -805,7 +816,7 @@ function createAgent(deps) {
     }
     try {
       const result = await tool.handler(call.args || {}, chatId);
-      logToolCall({ chatId, tool: call.name, args: call.args, ok: true, confirmed: needsConfirm(tool, tainted) });
+      logToolCall({ chatId, tool: call.name, args: call.args, ok: true, confirmed: unknownUrl || needsConfirm(tool, tainted) });
       return result;
     } catch (e) {
       logToolCall({ chatId, tool: call.name, args: call.args, ok: false, error: e.message });
@@ -898,6 +909,8 @@ function createAgent(deps) {
       if (image) userParts.push({ inlineData: { mimeType: image.mimeType, data: image.data } });
       appendContents(chatId, session, [{ role: 'user', parts: userParts }]);
 
+      const prov = { unattended: false, seen: makeSeen(userText) };
+
       stallTimer = setTimeout(() => {
         send(chatId, '<blockquote>Đang xử lý yêu cầu, vui lòng đợi...</blockquote>').catch(() => {});
       }, STALL_NOTICE_MS);
@@ -929,7 +942,8 @@ function createAgent(deps) {
         const tainted = taintedByImage || hasUntrustedResult(session.contents) || callsIncludeUntrusted(calls);
         const responseParts = [];
         for (const call of calls) {
-          const result = await dispatchTool(chatId, call, tainted, taintedByImage ? 'image' : 'web');
+          const result = await dispatchTool(chatId, call, tainted, taintedByImage ? 'image' : 'web', prov);
+          if (URL_SOURCES.has(call.name)) for (const u of makeSeen(result)) prov.seen.add(u);
           responseParts.push(createPartFromFunctionResponse(call.id || call.name, call.name, result));
         }
         appendContents(chatId, session, [{ role: 'user', parts: responseParts }]);
@@ -976,6 +990,7 @@ function createAgent(deps) {
       const contents = [{ role: 'user', parts: [{ text: job.prompt }] }];
       const systemInstruction = `${buildSystemInstruction()}\n\n${UNATTENDED_NOTE}`;
       const deadline = Date.now() + UNATTENDED_TIMEOUT_MS;
+      const prov = { unattended: true, seen: makeSeen(job.prompt) };
       let finalText = null;
 
       for (let i = 0; i < MAX_UNATTENDED_LOOPS && finalText === null; i++) {
@@ -994,8 +1009,9 @@ function createAgent(deps) {
         for (const call of calls) {
           // Tool ngoai danh sach (model bia ra / bi tiem lenh) -> tu choi, khong cho di qua dispatchTool.
           const result = UNATTENDED_TOOLS.has(call.name)
-            ? await dispatchTool(chatId, call, false)
+            ? await dispatchTool(chatId, call, false, 'web', prov) // khong co nguoi bam Xac nhan; fetchUrl da bi gioi han boi prov
             : { error: `Tool "${call.name}" không được phép trong chế độ tự động.` };
+          if (URL_SOURCES.has(call.name)) for (const u of makeSeen(result)) prov.seen.add(u);
           responseParts.push(createPartFromFunctionResponse(call.id || call.name, call.name, result));
         }
         contents.push({ role: 'user', parts: responseParts });
