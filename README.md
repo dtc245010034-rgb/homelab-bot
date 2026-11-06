@@ -2,7 +2,7 @@
 
 Bot Telegram để **giám sát và điều khiển máy chủ homelab Linux** từ điện thoại, kèm một **trợ lý AI (Gemini)** biết đọc tin, quản lý lịch tuần, đặt nhắc việc và tự làm báo cáo Word.
 
-> English summary: a self-hosted Telegram bot for Linux homelabs (system status, Pi-hole, Wake-on-LAN, camera motion alerts, weather radar) with a Gemini-powered agent (weekly schedule, reminders, scheduled AI news digests, Word reports). Vietnamese UI. Node.js 20+, MIT license.
+> English summary: a self-hosted Telegram bot for Linux homelabs (system status, Pi-hole, Wake-on-LAN, camera motion alerts, weather radar) with a Gemini-powered agent (weekly schedule, reminders, scheduled AI news digests, Word reports). Vietnamese UI. Node.js 20+, MIT license. Highlight: automatic Gemini model rotation, so the free-tier daily quota of one model never stops the agent.
 
 ## Tính năng
 
@@ -13,10 +13,30 @@ Bot Telegram để **giám sát và điều khiển máy chủ homelab Linux** t
 | **Máy tính chính** | `/ping` kiểm tra bật/tắt, `/wol` bật máy bằng Wake-on-LAN |
 | **Camera Hikvision** | `/cam` chụp ảnh, `/motion on|off` cảnh báo chuyển động kèm ảnh và clip 10 giây |
 | **Thời tiết** | `/morning` báo cáo ngày (thời tiết, tin tức, giá ETF), `/wmap` bản đồ radar mưa |
-| **Agent AI** | `/agent <câu hỏi>`: tìm tin, đọc link, ghi nhớ dài hạn, quản lý lịch tuần, nhắc việc, làm file Word, đặt nhiệm vụ tự động hằng ngày |
+| **Agent AI** | **tự xoay ca 4 model Gemini khi hết quota**. `/agent <câu hỏi>`: tìm tin, đọc link, ghi nhớ dài hạn, quản lý lịch tuần, nhắc việc, làm file Word, đặt nhiệm vụ tự động hằng ngày |
 | **Bảo trì** | `/cleanup` dọn rác, `/reboot` khởi động lại (có xác nhận) |
 
 Gõ `/help` trong Telegram để mở bảng điều khiển có nút bấm.
+
+## Điểm nổi bật: xoay ca model Gemini
+
+Gói Gemini miễn phí chỉ cho khoảng **20 yêu cầu mỗi ngày cho mỗi model**, và Google tính hạn mức **riêng từng model**. Thay vì dừng khi một model hết lượt, bot **tự động xoay ca** sang model kế tiếp, nên agent gần như luôn trả lời được: bốn model cộng lại cho khoảng 80 yêu cầu mỗi ngày mà bạn không phải làm gì.
+
+```text
+gemini-3.6-flash  ──(hết quota)──►  gemini-3.5-flash  ──►  gemini-3-flash-preview  ──►  gemini-3.1-flash-lite
+  (ưu tiên, đổi bằng GEMINI_MODEL)
+```
+
+Cách hoạt động:
+
+- **Chỉ xoay khi Google báo hết hạn mức ngày thật** (lỗi 429 loại `PerDay`). Bot ghi lại con số hạn mức Google trả về, đánh dấu model đó "hết quota hôm nay" và chuyển sang model kế tiếp còn lượt. Cuộc hội thoại đang dở vẫn tiếp tục bình thường vì lịch sử nằm ở bot, không nằm ở model.
+- **Lỗi tạm thời không làm mất model.** Giới hạn theo phút thì đợi 7 giây rồi thử lại. Lỗi mạng hoặc lỗi 5xx thì thử lại sau 1,5 giây. Vẫn lỗi mới chuyển sang model khác.
+- **Lỗi khác không bị xoay** (ví dụ sai định dạng yêu cầu), vì đổi model cũng không giúp gì mà chỉ đốt thêm lượt.
+- **Tự đếm và tự làm mới theo ngày của Google.** Bộ đếm lưu ở `agent-workspace/logs/quota-counter.json` và đặt lại khi sang ngày theo giờ Mỹ (Pacific), tức khoảng 14:00 đến 15:00 giờ Việt Nam tuỳ mùa. Sau mốc đó model ưu tiên được dùng lại.
+- **Nhìn và chọn tay:** gõ `/agent quota` hoặc bấm nút **Model Gemini** trong `/help` để xem mỗi model đã dùng bao nhiêu, model nào đang chạy (⬅️), model nào đã hết, và bấm tên model để ép bot dùng model đó. Con số không có dấu `~` là Google báo thật, còn lại là bot tự đếm ước tính.
+- Nhiệm vụ định kỳ (như bản tin AI mỗi sáng) cũng dùng chung cơ chế này.
+
+Danh sách model nằm ở `MODEL_CANDIDATES` trong `agent.js`. Khi Google đổi hoặc gỡ model, chỉ cần sửa danh sách đó.
 
 ## Yêu cầu
 
@@ -67,7 +87,7 @@ Bot **chỉ nghe lệnh từ đúng chat ID này**, người khác nhắn bot s�
 - Hoặc nhắn **@userinfobot** để biết ID của bạn.
 
 ### 3. Gemini API key (tuỳ chọn, cho agent AI)
-Vào https://aistudio.google.com/apikey, tạo key miễn phí. Gói miễn phí giới hạn khoảng **20 yêu cầu mỗi ngày cho mỗi model** (reset khoảng 14:00 giờ Việt Nam). Bot tự chuyển sang model dự phòng khi một model hết quota. Gõ `/agent quota` để xem đã dùng bao nhiêu.
+Vào https://aistudio.google.com/apikey, tạo key miễn phí. Gói miễn phí giới hạn khoảng **20 yêu cầu mỗi ngày cho mỗi model** (reset khoảng 14:00 đến 15:00 giờ Việt Nam). Bot tự [xoay ca sang model dự phòng](#điểm-nổi-bật-xoay-ca-model-gemini) khi một model hết quota. Gõ `/agent quota` để xem đã dùng bao nhiêu.
 
 ### 4. OpenWeatherMap key (tuỳ chọn, cho thời tiết)
 Đăng ký tại https://openweathermap.org/api, dùng gói miễn phí. Key mới có thể mất vài giờ mới kích hoạt.
@@ -182,7 +202,7 @@ File `.env`, lịch tuần, bộ nhớ agent và lịch sử đều là dữ li�
 |---|---|
 | Bot không trả lời | Kiểm tra `pm2 logs homelab-bot`. Đúng `ALLOWED_CHAT_ID` chưa? Token còn hiệu lực không? |
 | `Thiếu biến môi trường bắt buộc` | Thiếu `TELEGRAM_BOT_TOKEN` hoặc `ALLOWED_CHAT_ID` trong `.env` |
-| `/agent` báo hết quota | Gói miễn phí Gemini hết lượt, thử lại sau 14:00 giờ Việt Nam hoặc đổi `GEMINI_MODEL` |
+| `/agent` báo hết quota | Cả bốn model đều hết lượt ngày, thử lại sau khoảng 14:00 đến 15:00 giờ Việt Nam. Xem `/agent quota` |
 | `/agent` báo giới hạn tốc độ | Gửi quá nhanh, đợi vài giây |
 | `/cam` hoặc `/wmap` lỗi | Chưa cài `ffmpeg` hoặc `imagemagick` |
 | `/ping`, `/wol` báo chưa cấu hình | Điền `MAIN_PC_IP`, `MAIN_PC_MAC` trong `.env` |
