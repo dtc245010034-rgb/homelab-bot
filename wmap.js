@@ -1,8 +1,7 @@
 // wmap.js — weather map generator (OWM tiles + ImageMagick)
-// Đặt file này cùng thư mục với bot.js (~/uptime-kuma/wmap.js)
 // Yêu cầu: ImageMagick (`convert`) đã có sẵn trên máy (đang dùng cho motion-check.js)
 // API key OWM được truyền vào từ bot.js (tham số thứ 3 của generateWeatherMap),
-// không đọc từ env — khớp với cách bot.js hardcode OWM key trong handleWeekly().
+// không đọc từ env.
 
 const fs = require('fs');
 const path = require('path');

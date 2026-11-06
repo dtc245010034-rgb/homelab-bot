@@ -993,7 +993,7 @@ function createAgent(deps) {
       let finalText = null;
 
       for (let i = 0; i < MAX_UNATTENDED_LOOPS && finalText === null; i++) {
-        if (Date.now() > deadline) throw new Error('quá thời gian xử lý (>5 phút)');
+        if (Date.now() > deadline) throw new Error(`quá thời gian xử lý (>${Math.round(UNATTENDED_TIMEOUT_MS / 60000)} phút)`);
         const response = await callGeminiWithRetry({
           contents,
           config: { systemInstruction, tools: [{ functionDeclarations: declarations }] },

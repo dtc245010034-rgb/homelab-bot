@@ -580,8 +580,8 @@ async function handleMotion(chatId, args = [], msgId = null) {
       `<b>GIÁM SÁT CHUYỂN ĐỘNG CAMERA</b>\n` +
       `<blockquote>` +
       `▸ <b>Trạng thái:</b> ${isOn ? '<code>[ĐANG BẬT]</code>' : '<code>[ĐANG TẮT]</code>'}\n` +
-      `▸ <b>Độ nhạy:</b> <code>RMSE > 6000</code>\n` +
-      `▸ <b>Hành động:</b> Tự động quay clip 10s gửi Telegram` +
+      `▸ <b>Độ nhạy:</b> <code>RMSE > ${S.MOTION.threshold}</code>\n` +
+      `▸ <b>Hành động:</b> Tự động quay clip ${S.MOTION.clipSeconds}s gửi Telegram` +
       `</blockquote>`;
 
     const buttons = [
