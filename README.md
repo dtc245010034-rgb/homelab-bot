@@ -238,6 +238,7 @@ File `.env`, lịch tuần, bộ nhớ agent và lịch sử đều là dữ li�
 | `/temp` trống | Chạy `sudo sensors-detect` rồi cài `lm-sensors` |
 | Một nguồn tin RSS lỗi | Bình thường, bot tự bỏ qua nguồn đó và ghi chú |
 | Đổi `.env` mà không có tác dụng | `pm2 restart homelab-bot` |
+| Giờ trong tin nhắn hoặc giờ hẹn bị lệch | Đặt `TIMEZONE` đúng múi giờ của bạn (ví dụ `Asia/Bangkok`) rồi `pm2 restart homelab-bot` |
 
 ## Cấu trúc thư mục
 

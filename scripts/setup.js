@@ -60,7 +60,11 @@ async function detectChatId(token) {
     env.LOCATION_LON = await ask('Kinh độ', '105.8342');
   }
 
-  if (await yes('\n5) Có máy tính chính trong LAN để dùng /ping và Wake-on-LAN?', false)) {
+  const tz = await ask('\nMúi giờ (tên IANA, ví dụ Asia/Ho_Chi_Minh, Asia/Bangkok, Europe/Paris)', 'Asia/Ho_Chi_Minh');
+  try { new Intl.DateTimeFormat('en-US', { timeZone: tz }); if (tz !== 'Asia/Ho_Chi_Minh') env.TIMEZONE = tz; }
+  catch { console.log('   Múi giờ không hợp lệ, dùng mặc định Asia/Ho_Chi_Minh.'); }
+
+  if (await yes('5) Có máy tính chính trong LAN để dùng /ping và Wake-on-LAN?', false)) {
     env.MAIN_PC_IP = await ask('IP máy chính (vd 192.168.1.62)');
     env.MAIN_PC_MAC = await ask('MAC máy chính (vd AA:BB:CC:DD:EE:FF)');
   }
