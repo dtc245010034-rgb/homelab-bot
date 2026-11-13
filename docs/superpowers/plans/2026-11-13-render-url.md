@@ -15,7 +15,7 @@
 - Node `>=20.4.0`, CommonJS (`require`), test bằng `node --test test/` (`npm test`). Không thêm phụ thuộc mới nếu pipe chạy được.
 - Quy ước repo: tên test và comment ASCII không dấu; chuỗi gửi người dùng/model có dấu tiếng Việt.
 - Chrome: `--headless=new`, hồ sơ tạm `/tmp`, **không** đổi User-Agent, **không** cờ ẩn dấu tự động hóa, không cookie/đăng nhập, không tải ảnh/video/font.
-- Scope: `MemoryMax=600M`, `MemoryHigh=450M`, `MemorySwapMax=0`, `CPUQuota=150%`, `CPUWeight=20`, `oom_score_adj=1000` (ghi `/proc/self/oom_score_adj` trong scope). Không đặt được scope thì **từ chối chạy**.
+- Scope: `MemoryMax=600M`, `MemoryHigh=450M`, `MemorySwapMax=0`, `CPUQuota=150%`, `CPUWeight=20`, `oom_score_adj=1000` nâng best-effort cho mọi tiến trình trong scope sau khi Chrome khởi động (Chrome tự đặt lại điểm của nó, nên không thể đặt trước bằng thừa hưởng; xem mục 9 điểm 5 của thiết kế). Không đặt được scope thì **từ chối chạy**.
 - 1 Chrome cùng lúc; `RENDER_MAX_PER_HOUR` mặc định 10; 1 lần `renderUrl` mỗi yêu cầu agent; tối đa 8 MB tải; chữ trả về 12.000 ký tự.
 - `RENDER_TIMEOUT_SEC`: mặc định 60, min 20, max 90. Thời gian thật = `min(trần, thời gian còn lại của yêu cầu − 15000 ms)`. Không đổi `AGENT_REQUEST_TIMEOUT_SEC`.
 - Bị chặn khi: HTTP 401/403/429/503, hoặc chữ < 80 ký tự, hoặc dấu hiệu CAPTCHA/kiểm tra bot. Lời nhắn: "Trang này chặn truy cập tự động. Hãy báo người dùng; không thử cách khác để vượt."
