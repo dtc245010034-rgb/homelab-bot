@@ -189,7 +189,21 @@ test('reapLeftovers: chi diet tien trinh con song co profileDir trong cmdline, b
   mk(222, 'node\0--user-data-dir=/tmp/other\0');            // PID bi tai su dung boi tien trinh khac
   const killed = [];
   const kill = (pid, sig) => { killed.push([pid, sig]); fs.rmSync(path.join(root, String(pid)), { recursive: true }); };
-  await reapLeftovers({ pids: [111, 222, 333], profileDir: '/tmp/homelab-render-X', procRoot: root, kill, waitMs: 1000 });
+  await reapLeftovers({ profileDir: '/tmp/homelab-render-X', procRoot: root, kill, waitMs: 1000 });
   assert.deepEqual(killed, [[111, 'SIGKILL']]);
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+test('reapLeftovers: diet ca tien trinh con moi sinh sau luc chup danh sach PID (Chrome khoi dong lai dich vu mang)', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'fake-proc-'));
+  const mk = (pid, cmd) => { fs.mkdirSync(path.join(root, String(pid))); fs.writeFileSync(path.join(root, String(pid), 'cmdline'), cmd); };
+  mk(111, 'chrome\0--user-data-dir=/tmp/homelab-render-Y\0');
+  mk(444, 'chrome\0--type=utility\0--user-data-dir=/tmp/homelab-render-Y\0');   // khong co trong danh sach PID da chup
+  mk(555, 'chrome\0--user-data-dir=/tmp/homelab-render-Z\0');                    // cua lan chay khac: khong dung toi
+  const killed = [];
+  const kill = (pid, sig) => { killed.push(pid); fs.rmSync(path.join(root, String(pid)), { recursive: true }); };
+  await reapLeftovers({ profileDir: '/tmp/homelab-render-Y', procRoot: root, kill, waitMs: 1000 });
+  assert.deepEqual(killed.sort(), [111, 444]);
+  assert.ok(fs.existsSync(path.join(root, '555')));
   fs.rmSync(root, { recursive: true, force: true });
 });
