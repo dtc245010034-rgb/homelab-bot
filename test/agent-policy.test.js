@@ -94,3 +94,27 @@ test('getBriefing / searchHistory: coi la du lieu ngoai; che do tu dong chi co g
   assert.ok(URL_SOURCES.has('getBriefing'));
   assert.equal(callsIncludeUntrusted([{ name: 'searchHistory' }]), true);
 });
+
+test('renderUrl: la nguon khong tin cay, khong duoc dung trong nhiem vu tu chay, khong lam nguon URL', () => {
+  const { UNATTENDED_TOOLS, URL_SOURCES } = require('../lib/agent-policy');
+  assert.equal(UNTRUSTED_TOOLS.has('renderUrl'), true);
+  assert.equal(UNATTENDED_TOOLS.has('renderUrl'), false);
+  assert.equal(URL_SOURCES.has('renderUrl'), false);
+});
+
+test('takeRenderSlot: lan dau true roi danh dau, lan sau false; khong co prov thi luon true', () => {
+  const { takeRenderSlot } = require('../lib/agent-policy');
+  const prov = { unattended: false };
+  assert.equal(takeRenderSlot(prov), true);
+  assert.equal(prov.renderUsed, true);
+  assert.equal(takeRenderSlot(prov), false);
+  assert.equal(takeRenderSlot(null), true);
+});
+
+test('remainingMs: tinh tu deadline cua yeu cau, khong co deadline -> Infinity', () => {
+  const { remainingMs } = require('../lib/agent-policy');
+  assert.equal(remainingMs({ deadline: 5000 }, 2000), 3000);
+  assert.equal(remainingMs({}), Infinity);
+  assert.equal(remainingMs(null), Infinity);
+  assert.equal(remainingMs({ deadline: 1000 }, 2000), 0);
+});
