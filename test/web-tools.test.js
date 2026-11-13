@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { isPrivateIp, assertPublicUrl, htmlToText, fetchUrl, searchNews, realLinkOf } = require('../lib/web-tools');
+const { isPrivateIp, isLocalInterfaceIp, assertPublicUrl, htmlToText, fetchUrl, searchNews, realLinkOf } = require('../lib/web-tools');
 
 const pub = async () => [{ address: '93.184.216.34' }];
 
@@ -108,4 +108,31 @@ test('searchNews: tra link goc, gioi han max, chon mkt theo ngon ngu', async () 
   assert.equal(params.mkt, 'vi-VN');
   assert.equal(params.q, 'openai');
   await assert.rejects(searchNews('   ', { http }), /từ khoá/);
+});
+
+const IFACES = {
+  lo: [{ address: '127.0.0.1', cidr: '127.0.0.1/8', family: 'IPv4', internal: true }],
+  eth0: [
+    { address: '192.168.1.10', cidr: '192.168.1.10/24', family: 'IPv4', internal: false },
+    { address: '2001:db8:aa:bb::5', cidr: '2001:db8:aa:bb::5/64', family: 'IPv6', internal: false },
+  ],
+};
+
+test('isLocalInterfaceIp: dia chi nam trong dai mang cua giao dien cua chinh may (IPv6 toan cau, IPv4 /24) -> true', () => {
+  assert.equal(isLocalInterfaceIp('2001:db8:aa:bb::5', IFACES), true);          // chinh may
+  assert.equal(isLocalInterfaceIp('2001:db8:aa:bb::1', IFACES), true);          // router/camera cung /64
+  assert.equal(isLocalInterfaceIp('2001:DB8:AA:BB:ffff::9', IFACES), true);     // chu hoa, dang khac
+  assert.equal(isLocalInterfaceIp('2001:db8:aa:cc::1', IFACES), false);         // /64 khac
+  assert.equal(isLocalInterfaceIp('93.184.216.34', IFACES), false);
+  assert.equal(isLocalInterfaceIp('::ffff:192.168.1.77', IFACES), true);        // IPv4-mapped cua LAN
+  assert.equal(isLocalInterfaceIp('2606:2800:220:1:248:1893:25c8:1946', IFACES), false);
+  assert.equal(isLocalInterfaceIp('khong-phai-ip', IFACES), false);
+  assert.equal(isLocalInterfaceIp('1.2.3.4', {}), false);
+});
+
+test('assertPublicUrl: IP literal IPv6 toan cau cua chinh may / cung /64 bi chan khi truyen bang giao dien', async () => {
+  await assert.rejects(assertPublicUrl('http://[2001:db8:aa:bb::5]:3001/', pub, IFACES), /nội bộ/);
+  await assert.rejects(assertPublicUrl('http://[2001:db8:aa:bb::1]/admin/', pub, IFACES), /nội bộ/);
+  const u = await assertPublicUrl('http://[2606:2800:220:1::1]/', pub, IFACES);
+  assert.equal(u.hostname, '[2606:2800:220:1::1]');
 });

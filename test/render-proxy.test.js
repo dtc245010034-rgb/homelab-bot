@@ -126,3 +126,55 @@ test('HTTP thuong toi host cong khai: chuyen tiep toi dung IP da ghim, tra than 
     });
   } finally { target.close(); }
 });
+
+const IFACES = { eth0: [{ address: '2001:db8:aa:bb::5', cidr: '2001:db8:aa:bb::5/64', family: 'IPv6', internal: false }] };
+
+test('CONNECT toi IPv6 toan cau cung /64 voi giao dien cua may (mac dinh isPrivate) -> 403, khong ket noi', async () => {
+  const { calls, connect } = makeConnect();
+  await withProxy({ lookup: lookupTo('2001:db8:aa:bb::1'), connect, interfaces: () => IFACES }, async ({ proxy, port }) => {
+    for (const target of ['[2001:db8:aa:bb::5]:3001', '[2001:db8:aa:bb::1]:22', 'host-doc-hai.test:80']) {
+      const r = await raw(port, `CONNECT ${target} HTTP/1.1\r\nHost: ${target}\r\n\r\n`);
+      assert.match(r.head, /^HTTP\/1\.1 403/, target);
+      r.socket.destroy();
+    }
+    assert.equal(calls.length, 0);
+    assert.ok(proxy.stats().blockedHosts.length >= 1);
+  });
+});
+
+test('CONNECT: cong ngoai 1..65535 -> 400, khong ket noi, proxy khong sap', async () => {
+  const { calls, connect } = makeConnect();
+  await withProxy({ lookup: lookupTo(PUBLIC), connect }, async ({ port }) => {
+    for (const target of ['example.test:99999', 'example.test:0']) {
+      const r = await raw(port, `CONNECT ${target} HTTP/1.1\r\nHost: ${target}\r\n\r\n`);
+      assert.match(r.head, /^HTTP\/1\.1 400/, target);
+      r.socket.destroy();
+    }
+    assert.equal(calls.length, 0);
+    const ok = await raw(port, 'CONNECT example.test:443 HTTP/1.1\r\nHost: example.test:443\r\n\r\n');
+    assert.match(ok.head, /^HTTP\/1\.1 200/);   // van phuc vu binh thuong sau khi bi gui rac
+    ok.socket.destroy();
+  });
+});
+
+test('CONNECT: connect() nem loi dong bo -> 502, khong gay unhandled rejection', async () => {
+  let unhandled = 0;
+  const onUnhandled = () => { unhandled++; };
+  process.on('unhandledRejection', onUnhandled);
+  try {
+    await withProxy({ lookup: lookupTo(PUBLIC), connect: () => { throw new Error('boom'); } }, async ({ port }) => {
+      const r = await raw(port, 'CONNECT example.test:443 HTTP/1.1\r\nHost: example.test:443\r\n\r\n');
+      assert.match(r.head, /^HTTP\/1\.1 502/);
+      r.socket.destroy();
+      await new Promise(r2 => setTimeout(r2, 50));
+    });
+  } finally { process.off('unhandledRejection', onUnhandled); }
+  assert.equal(unhandled, 0);
+});
+
+test('start(): cong dang bi chiem/loi listen -> reject thay vi treo', async () => {
+  const proxy = createRenderProxy({});
+  const orig = http.Server.prototype.listen;
+  http.Server.prototype.listen = function () { process.nextTick(() => this.emit('error', new Error('EADDRINUSE'))); return this; };
+  try { await assert.rejects(proxy.start(), /EADDRINUSE/); } finally { http.Server.prototype.listen = orig; }
+});

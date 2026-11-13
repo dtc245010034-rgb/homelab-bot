@@ -5,7 +5,7 @@ const os = require('node:os');
 const http = require('node:http');
 const { PassThrough } = require('node:stream');
 const { execFileSync, spawnSync } = require('node:child_process');
-const { createCdpClient, buildScopeArgs, buildChromeArgs, renderWithChrome, reapLeftovers } = require('../lib/render-chrome');
+const { createCdpClient, buildScopeArgs, buildChromeArgs, renderWithChrome, reapLeftovers, stopScope } = require('../lib/render-chrome');
 const { EventEmitter } = require('node:events');
 const path = require('node:path');
 const { createRenderProxy } = require('../lib/render-proxy');
@@ -146,7 +146,7 @@ test('cdp: du lieu khong co NUL vuot maxBufferBytes -> reject lenh dang cho va g
 });
 
 // Chrome gia: tra loi lenh CDP theo ten, de kiem tra renderWithChrome gui nhung lenh nao.
-function fakeChromeSpawn(sent) {
+function fakeChromeSpawn(sent, evalValue) {
   return () => {
     const toChrome = new PassThrough(), fromChrome = new PassThrough();
     const child = new EventEmitter();
@@ -161,7 +161,8 @@ function fakeChromeSpawn(sent) {
         const results = {
           'Target.createTarget': { targetId: 'T' }, 'Target.attachToTarget': { sessionId: 'S' },
           'Page.getFrameTree': { frameTree: { frame: { id: 'F' } } }, 'Page.navigate': { frameId: 'F' },
-          'Runtime.evaluate': { result: { value: JSON.stringify({ t: 'Tieu de', x: 'Noi dung '.repeat(20) }) } },
+          'Page.createIsolatedWorld': { executionContextId: 7 },
+          'Runtime.evaluate': { result: { value: evalValue !== undefined ? evalValue : JSON.stringify({ t: 'Tieu de', x: 'Noi dung '.repeat(20) }) } },
         };
         fromChrome.write(JSON.stringify({ id: m.id, result: results[m.method] || {} }) + '\0');
         if (m.method === 'Page.navigate') fromChrome.write(JSON.stringify({ method: 'Page.loadEventFired', params: {}, sessionId: 'S' }) + '\0');
@@ -206,4 +207,27 @@ test('reapLeftovers: diet ca tien trinh con moi sinh sau luc chup danh sach PID 
   assert.deepEqual(killed.sort(), [111, 444]);
   assert.ok(fs.existsSync(path.join(root, '555')));
   fs.rmSync(root, { recursive: true, force: true });
+});
+
+test('renderWithChrome: doc chu trong the gioi co lap (contextId), trang khong ghi de duoc JSON/slice', async () => {
+  const sent = [];
+  await renderWithChrome('http://example.test/', { timeoutMs: 20000, chromePath: 'chrome', proxyPort: 1, spawn: fakeChromeSpawn(sent) });
+  assert.ok(sent.some(m => m.method === 'Page.createIsolatedWorld' && m.params.frameId === 'F'));
+  const ev = sent.find(m => m.method === 'Runtime.evaluate');
+  assert.equal(ev.params.contextId, 7);
+});
+
+test('renderWithChrome: trang doc hai tra tieu de/noi dung qua lon hoac sai kieu -> bot van nhan chuoi da cat', async () => {
+  const hostile = JSON.stringify({ t: 'T'.repeat(5000), x: ['a'.repeat(100000), 'b'.repeat(100000)] });
+  const r = await renderWithChrome('http://example.test/', { timeoutMs: 20000, chromePath: 'chrome', proxyPort: 1, spawn: fakeChromeSpawn([], hostile) });
+  assert.equal(typeof r.title, 'string'); assert.ok(r.title.length <= 500);
+  assert.equal(typeof r.text, 'string'); assert.ok(r.text.length <= 20000);
+  const junk = await renderWithChrome('http://example.test/', { timeoutMs: 20000, chromePath: 'chrome', proxyPort: 1, spawn: fakeChromeSpawn([], 'khong phai json {') });
+  assert.equal(junk.text, '');
+});
+
+test('stopScope: systemctl treo khong giu finally mai -> tra ve sau timeout', async () => {
+  const t0 = Date.now();
+  await stopScope('homelab-render-x', { exec: () => ({ /* khong bao gio goi callback */ }), timeoutMs: 80 });
+  assert.ok(Date.now() - t0 < 1000);
 });
