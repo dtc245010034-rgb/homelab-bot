@@ -136,3 +136,11 @@ test('assertPublicUrl: IP literal IPv6 toan cau cua chinh may / cung /64 bi chan
   const u = await assertPublicUrl('http://[2606:2800:220:1::1]/', pub, IFACES);
   assert.equal(u.hostname, '[2606:2800:220:1::1]');
 });
+
+test('isLocalInterfaceIp: IPv6 boc IPv4 (NAT64, 6to4, IPv4-compat) cua dai mang giao dien cung bi nhan ra', () => {
+  const ifc = { eth0: [{ address: '203.0.113.9', cidr: '203.0.113.9/24', family: 'IPv4', internal: false }] };  // dai IPv4 cong khai bat ky
+  assert.equal(isLocalInterfaceIp('64:ff9b::cb00:7105', ifc), true);     // NAT64 cua 203.0.113.5
+  assert.equal(isLocalInterfaceIp('2002:cb00:7105::1', ifc), true);      // 6to4 cua 203.0.113.5
+  assert.equal(isLocalInterfaceIp('::cb00:7105', ifc), true);            // IPv4-compat
+  assert.equal(isLocalInterfaceIp('64:ff9b::0808:0808', ifc), false);    // 8.8.8.8 khong thuoc dai
+});
