@@ -5,7 +5,9 @@ const os = require('node:os');
 const http = require('node:http');
 const { PassThrough } = require('node:stream');
 const { execFileSync, spawnSync } = require('node:child_process');
-const { createCdpClient, buildScopeArgs, buildChromeArgs, renderWithChrome } = require('../lib/render-chrome');
+const { createCdpClient, buildScopeArgs, buildChromeArgs, renderWithChrome, reapLeftovers } = require('../lib/render-chrome');
+const { EventEmitter } = require('node:events');
+const path = require('node:path');
 const { createRenderProxy } = require('../lib/render-proxy');
 
 const tmpRenderDirs = () => fs.readdirSync(os.tmpdir()).filter(n => n.startsWith('homelab-render-'));
@@ -131,4 +133,63 @@ test('renderWithChrome (tich hop SSRF): proxy mac dinh chan loopback, may chu no
     assert.ok(proxy.stats().blockedHosts.includes('127.0.0.1'));
     if (out) assert.ok(!/bi mat noi bo/.test(out.text));
   } finally { await proxy.stop(); server.close(); }
+});
+
+test('cdp: du lieu khong co NUL vuot maxBufferBytes -> reject lenh dang cho va goi onOverflow', async () => {
+  const input = new PassThrough(), output = new PassThrough();
+  let overflowed = 0;
+  const cdp = createCdpClient(input, output, { maxBufferBytes: 1000, onOverflow: () => { overflowed++; } });
+  const p = cdp.send('X.y');
+  input.write('a'.repeat(1500));
+  await assert.rejects(p, /quá lớn/);
+  assert.equal(overflowed, 1);
+});
+
+// Chrome gia: tra loi lenh CDP theo ten, de kiem tra renderWithChrome gui nhung lenh nao.
+function fakeChromeSpawn(sent) {
+  return () => {
+    const toChrome = new PassThrough(), fromChrome = new PassThrough();
+    const child = new EventEmitter();
+    Object.assign(child, { pid: 999999, stderr: new PassThrough(), stdio: [null, null, null, toChrome, fromChrome], kill() {} });
+    let buf = '';
+    toChrome.on('data', (d) => {
+      buf += d.toString();
+      let i;
+      while ((i = buf.indexOf('\0')) >= 0) {
+        const m = JSON.parse(buf.slice(0, i)); buf = buf.slice(i + 1);
+        sent.push(m);
+        const results = {
+          'Target.createTarget': { targetId: 'T' }, 'Target.attachToTarget': { sessionId: 'S' },
+          'Page.getFrameTree': { frameTree: { frame: { id: 'F' } } }, 'Page.navigate': { frameId: 'F' },
+          'Runtime.evaluate': { result: { value: JSON.stringify({ t: 'Tieu de', x: 'Noi dung '.repeat(20) }) } },
+        };
+        fromChrome.write(JSON.stringify({ id: m.id, result: results[m.method] || {} }) + '\0');
+        if (m.method === 'Page.navigate') fromChrome.write(JSON.stringify({ method: 'Page.loadEventFired', params: {}, sessionId: 'S' }) + '\0');
+      }
+    });
+    return child;
+  };
+}
+
+test('renderWithChrome: chan tai file (Browser.setDownloadBehavior deny) va cat chu ngay trong trang', async () => {
+  const sent = [];
+  const r = await renderWithChrome('http://example.test/', { timeoutMs: 20000, chromePath: 'chrome', proxyPort: 1, spawn: fakeChromeSpawn(sent) });
+  assert.equal(r.title, 'Tieu de');
+  const dl = sent.find(m => m.method === 'Browser.setDownloadBehavior');
+  assert.ok(dl, 'khong gui Browser.setDownloadBehavior');
+  assert.equal(dl.params.behavior, 'deny');
+  const ev = sent.find(m => m.method === 'Runtime.evaluate');
+  assert.match(ev.params.expression, /slice\(0,\s*\d+\)/); // cat trong trang, khong keo ca innerText ve tien trinh bot
+});
+
+test('reapLeftovers: chi diet tien trinh con song co profileDir trong cmdline, bo qua PID khac/khong ton tai', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'fake-proc-'));
+  const mk = (pid, cmd) => { fs.mkdirSync(path.join(root, String(pid))); fs.writeFileSync(path.join(root, String(pid), 'cmdline'), cmd); };
+  mk(111, 'chrome\0--type=utility\0--user-data-dir=/tmp/homelab-render-X\0');
+  mk(222, 'node\0--user-data-dir=/tmp/other\0');            // PID bi tai su dung boi tien trinh khac
+  const killed = [];
+  const kill = (pid, sig) => { killed.push([pid, sig]); fs.rmSync(path.join(root, String(pid)), { recursive: true }); };
+  await reapLeftovers({ pids: [111, 222, 333], profileDir: '/tmp/homelab-render-X', procRoot: root, kill, waitMs: 1000 });
+  assert.deepEqual(killed, [[111, 'SIGKILL']]);
+  fs.rmSync(root, { recursive: true, force: true });
 });
