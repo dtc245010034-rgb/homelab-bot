@@ -116,8 +116,9 @@ Làm trên một nhánh git, kiểm thử bằng bản chạy riêng (không dù
 - Chưa hỗ trợ link TikTok rút gọn.
 - `renderUrl` tách riêng khỏi `fetchUrl`, không tự động dự phòng bên trong `fetchUrl`.
 
-## 9. Việc chưa kiểm chứng (việc đầu tiên của người xây)
-1. `--remote-debugging-pipe` có đi qua `systemd-run --user --scope` không (nếu không: dùng `ws`).
-2. Chrome dùng proxy với `--proxy-bypass-list=<-loopback>` có thật sự chặn mọi đường tới loopback không (kiểm bằng một trang thử trên `127.0.0.1`).
-3. oEmbed trả gì cho link một video TikTok thật, và có nhận link rút gọn không.
-4. ~~Thời gian một lần gọi so với `AGENT_REQUEST_TIMEOUT_SEC`~~ **Đã kiểm trong code (`agent.js:1032`)**: `deadline` (90 giây cho cả yêu cầu) chỉ được kiểm ở đầu mỗi vòng gọi model, không cắt giữa lúc công cụ đang chạy. Một lần render 45 giây vẫn vừa; hai lần có thể vượt, nên giới hạn 1 lần mỗi yêu cầu (mục 5.5). Người xây vẫn cần đo thời gian thật cả luồng bằng một yêu cầu thật.
+## 9. Kết quả kiểm chứng (spike 2026-11-13, Chrome 152, máy dog-HP)
+1. **Pipe: ĐẠT.** `--remote-debugging-pipe` đi qua `systemd-run --user --scope ... bash -c 'echo 1000 > /proc/self/oom_score_adj; exec "$@"' _ google-chrome-stable ...` với `stdio: ['ignore','ignore','ignore','pipe','pipe']` (fd 3 ghi lệnh, fd 4 đọc phản hồi, khung JSON kết thúc `\0`). Chrome khởi động tới lúc trả lời `Target.getTargets` mất khoảng 3 giây ở lần đo ấm; lần đầu (nguội) lâu hơn 2,5 giây, nên bộ chạy phải **thăm dò chờ tối đa vài chục giây** chứ không chờ cố định. Chưa cần `ws`.
+2. **Loopback qua proxy: ĐẠT.** Với `--proxy-server=http://127.0.0.1:<cổng> --proxy-bypass-list=<-loopback>`, Chrome mở `http://127.0.0.1:<cổng đích>/x` thì proxy nhận request, máy chủ đích nhận 0 request trực tiếp. Đối chứng không có cờ bypass: máy chủ đích nhận 2 request trực tiếp. Ghi chú: Chrome còn tự gọi `clients2.google.com` (đồng bộ giờ) qua proxy; đó là IP công khai nên proxy cho qua.
+3. **oEmbed cho link một video và link rút gọn: CHƯA KIỂM CHỨNG** (chưa có link video công khai của kênh để thử). Code theo thiết kế: link rút gọn bị từ chối rõ ràng; link video được chấp nhận theo dạng `/@tên/video/<số>`; cần chủ máy đưa một link thật để thử ở Task 10.
+4. **Thời gian toàn luồng so với `AGENT_REQUEST_TIMEOUT_SEC`:** đã kiểm trong code (`agent.js:1032`), thời hạn chỉ kiểm ở đầu mỗi vòng gọi model; vì vậy trần render bị kẹp theo thời gian còn lại (mục 5.5.1) và giới hạn 1 lần mỗi yêu cầu. Cần đo thời gian thật cả luồng ở Task 10.
+5. **Chưa xác nhận:** `oom_score_adj=1000` có hiệu lực với Chrome bên trong scope không (spike không đọc được `/proc/<pid>/oom_score_adj` của Chrome); Task 6 kiểm bằng cách đọc `/proc` của tiến trình Chrome con khi đang chạy.
