@@ -166,6 +166,13 @@ function getSettings(env = process.env) {
       keepReports: num(env.AGENT_KEEP_REPORTS, 30, { min: 1, max: 1000, int: true }),
     }),
 
+    RENDER: Object.freeze({
+      enabled: bool(env.RENDER_ENABLED, true),
+      chromePath: String(env.RENDER_CHROME_PATH || '').trim() || 'google-chrome-stable',
+      timeoutMs: num(env.RENDER_TIMEOUT_SEC, 60, { min: 20, max: 90 }) * 1000,
+      maxPerHour: num(env.RENDER_MAX_PER_HOUR, 10, { min: 1, max: 120, int: true }),
+    }),
+
     WMAP: Object.freeze({
       watermark: env.WMAP_WATERMARK || 'homelab-bot',
       localZoom: num(env.WMAP_LOCAL_ZOOM, 9, { min: 3, max: 12, int: true }),

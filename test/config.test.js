@@ -194,3 +194,26 @@ test('getSettings: AGENT_BACKGROUND_MODEL doi duoc, "off" tat, AGENT_SUMMARIZE=0
   assert.equal(s.AGENT.summarize, false);
   assert.equal(s.AGENT.summaryMinTurns, 5);
 });
+
+test('getSettings: RENDER mac dinh khop thiet ke renderUrl', () => {
+  const R = require('../config').getSettings({}).RENDER;
+  assert.deepEqual({ ...R }, { enabled: true, chromePath: 'google-chrome-stable', timeoutMs: 60000, maxPerHour: 10 });
+});
+
+test('getSettings: RENDER_TIMEOUT_SEC ngoai [20,90] khong lam tran vuot 90s', () => {
+  const { getSettings } = require('../config');
+  for (const v of ['500', '1', 'abc']) {
+    const ms = getSettings({ RENDER_TIMEOUT_SEC: v }).RENDER.timeoutMs;
+    assert.ok(ms >= 20000 && ms <= 90000, `${v} -> ${ms}`);
+  }
+  assert.equal(getSettings({ RENDER_TIMEOUT_SEC: '90' }).RENDER.timeoutMs, 90000);
+  assert.equal(getSettings({ RENDER_TIMEOUT_SEC: '20' }).RENDER.timeoutMs, 20000);
+});
+
+test('getSettings: RENDER_ENABLED=0 tat, RENDER_MAX_PER_HOUR va RENDER_CHROME_PATH doi duoc', () => {
+  const { getSettings } = require('../config');
+  const R = getSettings({ RENDER_ENABLED: '0', RENDER_MAX_PER_HOUR: '3', RENDER_CHROME_PATH: ' /opt/chrome ' }).RENDER;
+  assert.equal(R.enabled, false);
+  assert.equal(R.maxPerHour, 3);
+  assert.equal(R.chromePath, '/opt/chrome');
+});
