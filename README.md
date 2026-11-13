@@ -13,7 +13,7 @@ Bot Telegram để **giám sát và điều khiển máy chủ homelab Linux** t
 | **Máy tính chính** | `/ping` kiểm tra bật/tắt, `/wol` bật máy bằng Wake-on-LAN |
 | **Camera Hikvision** | `/cam` chụp ảnh, `/motion on\|off` cảnh báo chuyển động kèm ảnh và clip |
 | **Thời tiết** | `/morning` bản tin sáng (thời tiết, tin, giá ETF), `/wmap` radar mưa |
-| **Agent AI** | `/agent <câu hỏi>`: tìm tin, đọc link, ghi nhớ, quản lý lịch tuần, nhắc việc, làm file Word, đặt nhiệm vụ tự động hằng ngày |
+| **Agent AI** | `/agent <câu hỏi>`: tìm tin, đọc link (kể cả trang cần JavaScript, qua Chrome ngầm), ghi nhớ, quản lý lịch tuần, nhắc việc, làm file Word, đặt nhiệm vụ tự động hằng ngày |
 | **Bảo trì** | `/cleanup` dọn rác, `/reboot` khởi động lại (có xác nhận) |
 
 Gõ `/help` trong Telegram để mở bảng điều khiển có nút bấm.

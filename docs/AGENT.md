@@ -55,6 +55,16 @@ Mỗi lần agent gọi model là một "lượt" trong hạn mức ngày, và m
 - Agent không chạy được lệnh hệ thống tự do.
 - Gói Gemini miễn phí: theo điều khoản của Google, nội dung gửi lên có thể được dùng để cải thiện sản phẩm của họ. Đừng nhờ agent xử lý thông tin bạn không muốn chia sẻ.
 
+## Đọc trang cần JavaScript (`renderUrl`)
+
+`fetchUrl` chỉ tải HTML thô nên không đọc được trang chỉ hiện nội dung sau khi chạy JavaScript (thường chỉ thấy chữ "Please wait..."). Khi đó agent gọi `renderUrl`:
+
+- **Trang thường:** mở Chrome chạy ngầm trên máy (cần `google-chrome-stable`), đọc chữ trang hiển thị rồi đóng Chrome ngay khi xong. Không đăng nhập, không lưu cookie, không tải ảnh/video/font, không cho trang tải file về máy.
+- **TikTok:** không mở Chrome. Bot dùng đường oEmbed công khai chính thức của TikTok: link hồ sơ (`tiktok.com/@tên`) cho tên kênh; link một video (`tiktok.com/@tên/video/<số>`) cho thêm tiêu đề, người đăng. Không có lượt xem, like hay danh sách video. Link rút gọn (`vm.tiktok.com`) chưa hỗ trợ.
+- **Trang chặn truy cập tự động** (CAPTCHA, "Just a moment", HTTP 403/429...): bot báo là trang chặn và **không thử cách khác để vượt**.
+- **An toàn:** mọi kết nối của Chrome đi qua một proxy riêng của bot chặn địa chỉ nội bộ (LAN, `127.0.0.1`), kể cả khi trang chuyển hướng hoặc nhúng tài nguyên tới đó. Chrome chạy trong giới hạn tài nguyên của `systemd` (RAM tối đa 600 MB, không dùng swap, CPU tối đa khoảng 1,5 nhân, ưu tiên thấp); không đặt được giới hạn này thì bot từ chối chạy thay vì chạy không giới hạn. Kết quả bị coi là dữ liệu không đáng tin, và công cụ này không dùng được trong nhiệm vụ hẹn giờ tự chạy.
+- **Giới hạn:** 1 lần mở Chrome cùng lúc, 1 lần `renderUrl` mỗi yêu cầu agent, tối đa 10 lần mỗi giờ (`RENDER_MAX_PER_HOUR`). Thời gian tối đa 60 giây (`RENDER_TIMEOUT_SEC`, 20–90), nhưng không vượt phần thời gian còn lại của yêu cầu (`AGENT_REQUEST_TIMEOUT_SEC`, mặc định 90 giây); muốn dùng đủ 90 giây thì tăng cả hai. Chrome khởi động mất vài giây trên máy yếu.
+
 ## Công cụ của agent
 
-`getBriefing`, `getSystemStatus`, `getPiholeStats`, `getWeather`, `getNews`, `getAiNews`, `searchNews`, `fetchUrl`, `viewSchedule`, `addScheduleItem`, `editScheduleItem`, `removeScheduleItem`, `clearSchedule`, `sendScheduleFile`, `setReminder`, `scheduleAgentTask`, `listReminders`, `cancelReminder`, `createReport`, `remember`, `recall`, `forget`, `searchHistory`.
+`getBriefing`, `getSystemStatus`, `getPiholeStats`, `getWeather`, `getNews`, `getAiNews`, `searchNews`, `fetchUrl`, `renderUrl`, `viewSchedule`, `addScheduleItem`, `editScheduleItem`, `removeScheduleItem`, `clearSchedule`, `sendScheduleFile`, `setReminder`, `scheduleAgentTask`, `listReminders`, `cancelReminder`, `createReport`, `remember`, `recall`, `forget`, `searchHistory`.
