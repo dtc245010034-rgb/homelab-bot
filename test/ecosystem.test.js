@@ -5,7 +5,8 @@ const path = require('node:path');
 const load = (env) => {
   const keys = ['PM2_APP_NAME', 'CAM_RTSP_URL'];
   const saved = Object.fromEntries(keys.map(k => [k, process.env[k]]));
-  for (const k of keys) delete process.env[k];
+  // Dat chuoi rong (khong xoa): dotenv trong ecosystem.config.js khong de len bien da ton tai, nen .env that cua may khong lam lech ket qua.
+  for (const k of keys) process.env[k] = '';
   Object.assign(process.env, env);
   const file = path.join(__dirname, '..', 'ecosystem.config.js');
   delete require.cache[require.resolve(file)];
