@@ -52,3 +52,8 @@ test('fetchOembed: loi mang -> reject co chu oEmbed', async () => {
   const http = { get: async () => { throw new Error('ECONNRESET'); } };
   await assert.rejects(fetchOembed(PROFILE, { http }), /oEmbed/);
 });
+
+test('fetchOembed: oEmbed khong co tieu de lan tac gia (video rieng tu/da xoa/chua cong khai) -> bao loi ro rang, khong tra ket qua rong', async () => {
+  const http = fakeHttp({ type: 'video', html: '<iframe></iframe>', embed_product_id: '7707383056658615604' });
+  await assert.rejects(fetchOembed('https://www.tiktok.com/@dogvanvat/video/7707383056658615604', { http }), /không cung cấp thông tin/);
+});
