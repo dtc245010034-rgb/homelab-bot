@@ -144,3 +144,37 @@ test('isLocalInterfaceIp: IPv6 boc IPv4 (NAT64, 6to4, IPv4-compat) cua dai mang 
   assert.equal(isLocalInterfaceIp('::cb00:7105', ifc), true);            // IPv4-compat
   assert.equal(isLocalInterfaceIp('64:ff9b::0808:0808', ifc), false);    // 8.8.8.8 khong thuoc dai
 });
+
+const SHEET = 'https://docs.google.com/spreadsheets/d/1AbC_dEf-123/edit?gid=1271431527#gid=1271431527';
+const csvHttp = (body) => { const calls = []; return { calls, get: async (url) => { calls.push(url); return { status: 200, headers: { 'content-type': 'text/csv; charset=utf-8' }, data: Buffer.from(body) }; } }; };
+
+test('fetchUrl: link Google Sheets doi sang CSV xuat, giu dung gid (trong query hoac #hash)', async () => {
+  const http = csvHttp('a,b\n1,2\n');
+  const r = await fetchUrl(SHEET, { http, lookup: pub });
+  assert.equal(http.calls[0], 'https://docs.google.com/spreadsheets/d/1AbC_dEf-123/export?format=csv&gid=1271431527');
+  assert.equal(r.text, 'a,b\n1,2');
+  const h2 = csvHttp('x');
+  await fetchUrl('https://docs.google.com/spreadsheets/d/1AbC_dEf-123/edit#gid=99', { http: h2, lookup: pub });
+  assert.equal(h2.calls[0], 'https://docs.google.com/spreadsheets/d/1AbC_dEf-123/export?format=csv&gid=99');
+  const h3 = csvHttp('x');
+  await fetchUrl('https://docs.google.com/spreadsheets/d/1AbC_dEf-123/edit?usp=sharing', { http: h3, lookup: pub });
+  assert.equal(h3.calls[0], 'https://docs.google.com/spreadsheets/d/1AbC_dEf-123/export?format=csv');
+});
+
+test('fetchUrl: CSV Google Sheets duoc phep dai hon trang thuong (40000 ky tu), van bao truncated khi vuot', async () => {
+  const big = 'x,'.repeat(15000);           // 30000 ky tu: qua 12000 mac dinh nhung < 40000
+  const r1 = await fetchUrl(SHEET, { http: csvHttp(big), lookup: pub });
+  assert.equal(r1.truncated, false);
+  assert.ok(r1.text.length > 12000);
+  const r2 = await fetchUrl(SHEET, { http: csvHttp('y'.repeat(50000)), lookup: pub });
+  assert.equal(r2.truncated, true);
+  assert.equal(r2.text.length, 40000);
+});
+
+test('fetchUrl: chi docs.google.com/spreadsheets/d/<id> moi doi sang CSV; ten mien gan giong hoac duong dan khac thi giu nguyen', async () => {
+  for (const u of ['https://docs.google.com/document/d/1AbC/edit', 'https://docs.google.com.evil.example/spreadsheets/d/1AbC/edit', 'https://example.com/spreadsheets/d/1AbC/edit', 'https://docs.google.com/spreadsheets/d/1AbC/../../x']) {
+    const http = csvHttp('<p>hi</p>');
+    await fetchUrl(u, { http, lookup: pub });
+    assert.ok(!/export\?format=csv/.test(http.calls[0]), u);
+  }
+});

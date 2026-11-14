@@ -724,7 +724,7 @@ function createAgent(deps) {
     },
     fetchUrl: {
       requiresConfirm: false,
-      description: 'Đọc nội dung chữ của 1 trang web công khai (http/https) để tóm tắt. Chặn địa chỉ nội bộ. Trả về url cuối, title, text (đã cắt ngắn).',
+      description: 'Đọc nội dung chữ của 1 trang web công khai (http/https) để tóm tắt. Chặn địa chỉ nội bộ. Link Google Sheets được đọc dưới dạng CSV của đúng tab. Trả về url cuối, title, text (đã cắt ngắn). Nếu truncated: true nghĩa là bạn CHƯA thấy hết nội dung: không được tự thêm/sửa lịch hay kết luận dựa trên phần thiếu, hãy báo người dùng.',
       parametersJsonSchema: {
         type: 'object',
         properties: { url: { type: 'string' } },
