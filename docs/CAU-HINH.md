@@ -4,7 +4,7 @@ Chỉ có 2 biến bắt buộc, còn lại bot chạy được với mặc đ�
 
 - Dòng bắt đầu bằng `#KEY=giá_trị` là tuỳ chọn và **giá trị ghi sẵn chính là mặc định**: bỏ dấu `#` rồi sửa là đổi được. `npm run setup` tự chép sẵn phần này vào `.env` của bạn.
 - Bỏ trống hoặc xoá dòng thì dùng mặc định. Giá trị sai (chữ thay vì số, ngoài khoảng cho phép, múi giờ không tồn tại) cũng tự về mặc định, bot không chết vì gõ nhầm.
-- Sửa `.env` xong cần `pm2 restart homelab-bot`.
+- Sửa `.env` xong cần `pm2 restart <tên tiến trình>` (mặc định `homelab-bot`, đổi bằng `PM2_APP_NAME` trong `.env`).
 
 ## Cơ bản
 
