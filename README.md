@@ -13,7 +13,7 @@ Bot Telegram để **giám sát và điều khiển máy chủ homelab Linux** t
 | **Máy tính chính** | `/ping` kiểm tra bật/tắt, `/wol` bật máy bằng Wake-on-LAN |
 | **Camera Hikvision** | `/cam` chụp ảnh, `/motion on\|off` cảnh báo chuyển động kèm ảnh và clip |
 | **Thời tiết** | `/morning` bản tin sáng (thời tiết, tin, giá ETF), `/wmap` radar mưa |
-| **Agent AI** | `/agent <câu hỏi>`: tìm tin, đọc link (kể cả trang cần JavaScript, qua Chrome ngầm), ghi nhớ, quản lý lịch tuần, nhắc việc, làm file Word, đặt nhiệm vụ tự động hằng ngày |
+| **Agent AI** | `/agent <câu hỏi>`: tìm tin, đọc link (kể cả bảng tính Google Sheets và trang cần JavaScript qua Chrome ngầm), ghi nhớ, quản lý lịch tuần, nhắc việc, làm file Word, đặt nhiệm vụ tự động hằng ngày |
 | **Bảo trì** | `/cleanup` dọn rác, `/reboot` khởi động lại (có xác nhận) |
 
 Gõ `/help` trong Telegram để mở bảng điều khiển có nút bấm.
@@ -58,6 +58,7 @@ Cài thủ công: `npm install --omit=dev`, `cp .env.example .env`, điền giá
 | `imagemagick` | `/wmap`, so sánh ảnh chuyển động | `sudo apt install imagemagick` |
 | `lm-sensors` | `/temp` | `sudo apt install lm-sensors` |
 | `pm2` | `/services`, chạy nền | `sudo npm install -g pm2` |
+| `google-chrome-stable` | Agent đọc trang cần JavaScript (`renderUrl`), cần thêm `systemd-run --user` (có sẵn trên Ubuntu/Debian dùng systemd) | Cài Chrome từ trang của Google; không có thì chỉ tính năng này báo lỗi |
 
 ## Lấy các khoá cần thiết
 
@@ -79,8 +80,9 @@ Chỉ `TELEGRAM_BOT_TOKEN` và `ALLOWED_CHAT_ID` là bắt buộc. Các biến t
 | `MAIN_PC_IP`, `MAIN_PC_MAC` | Bật `/ping` và `/wol` |
 | `CAM_RTSP_URL` | Camera Hikvision, ví dụ `rtsp://USER:PASS@192.168.1.10:554/Streaming/Channels/101` |
 | `TIMEZONE` | Múi giờ (mặc định `Asia/Ho_Chi_Minh`), ảnh hưởng cả giờ hẹn việc |
+| `PM2_APP_NAME` | Tên tiến trình trong PM2 khi chạy bằng `ecosystem.config.js` (mặc định `homelab-bot`) |
 
-Còn lại (ngưỡng cảnh báo, giờ chạy tác vụ, nguồn tin RSS, độ nhạy camera, model và giới hạn của agent...) đều có mặc định hợp lý và đổi được trong `.env`. Giá trị sai tự về mặc định, bot không chết vì gõ nhầm. Xem **[docs/CAU-HINH.md](docs/CAU-HINH.md)** và [`.env.example`](.env.example). Sửa `.env` xong cần `pm2 restart homelab-bot`.
+Còn lại (ngưỡng cảnh báo, giờ chạy tác vụ, nguồn tin RSS, độ nhạy camera, model và giới hạn của agent...) đều có mặc định hợp lý và đổi được trong `.env`. Giá trị sai tự về mặc định, bot không chết vì gõ nhầm. Xem **[docs/CAU-HINH.md](docs/CAU-HINH.md)** và [`.env.example`](.env.example). Sửa `.env` xong cần `pm2 restart <tên tiến trình>` (mặc định `homelab-bot`).
 
 ## Dùng agent AI
 
@@ -99,7 +101,7 @@ Gõ `/agent` kèm câu hỏi bằng tiếng Việt tự nhiên:
 
 Gửi **kèm ảnh** thời khoá biểu với caption `/agent ...` để agent đọc ảnh và thêm lịch. Lệnh khác: `/agent quota` xem quota Gemini, `/new` bắt đầu cuộc hội thoại mới.
 
-**An toàn:** mọi thao tác thay đổi dữ liệu đều hiện nút **Xác nhận / Huỷ**; nội dung từ web và tin tức chỉ được coi là dữ liệu, không thể ra lệnh cho bot; công cụ đọc web chặn địa chỉ nội bộ; nhiệm vụ chạy tự động chỉ được đọc và báo cáo. Gói miễn phí của Google có thể dùng nội dung gửi lên để cải thiện sản phẩm của họ, nên đừng nhờ agent xử lý thứ bạn muốn giữ riêng. Chi tiết: [docs/AGENT.md](docs/AGENT.md#an-toàn).
+**An toàn:** mọi thao tác thay đổi dữ liệu đều hiện nút **Xác nhận / Huỷ**; nội dung từ web và tin tức chỉ được coi là dữ liệu, không thể ra lệnh cho bot; công cụ đọc web chặn địa chỉ nội bộ (kể cả dải mạng IPv6 của chính máy); nhiệm vụ chạy tự động chỉ được đọc và báo cáo. Gói miễn phí của Google có thể dùng nội dung gửi lên để cải thiện sản phẩm của họ, nên đừng nhờ agent xử lý thứ bạn muốn giữ riêng. Chi tiết: [docs/AGENT.md](docs/AGENT.md#an-toàn).
 
 ## Tác vụ tự chạy
 
@@ -129,12 +131,12 @@ pm2 save
 pm2 startup               # chạy lệnh sudo mà nó in ra để tự bật lại khi khởi động máy
 ```
 
-Xem log: `pm2 logs homelab-bot`. Nếu có camera, `ecosystem.config.js` tự chạy thêm tiến trình `motion-check`.
+Xem log: `pm2 logs <tên tiến trình>`. `ecosystem.config.js` đặt tên tiến trình theo `PM2_APP_NAME` (mặc định `homelab-bot`), tự khởi động lại khi bot dùng quá 300 MB RAM (`max_memory_restart`) và giới hạn 20 lần khởi động lại liên tiếp. Nếu có camera, nó tự chạy thêm tiến trình `motion-check`.
 
 ## Cập nhật
 
 ```bash
-cd homelab-bot && git pull && npm install --omit=dev && pm2 restart all
+cd homelab-bot && git pull && npm ci --omit=dev && pm2 restart all
 ```
 
 `.env`, lịch tuần, bộ nhớ agent và lịch sử là dữ liệu cục bộ, `git pull` không đụng tới.
@@ -145,36 +147,44 @@ cd homelab-bot && git pull && npm install --omit=dev && pm2 restart all
 - Bot chỉ phục vụ đúng `ALLOWED_CHAT_ID`, và chỉ gọi ra ngoài (long-polling) nên **không cần mở cổng nào** ra Internet.
 - `/reboot` và `/pihole` dùng `sudo`. Nếu bot không chạy bằng root, cấp quyền không cần mật khẩu cho đúng các lệnh đó bằng `sudo visudo -f /etc/sudoers.d/homelab-bot`, ví dụ: `youruser ALL=(root) NOPASSWD: /sbin/reboot, /usr/bin/pihole`
 - Thông tin đăng nhập camera trong URL RTSP được che khỏi log và tin nhắn lỗi.
+- Công cụ đọc web chặn địa chỉ nội bộ, và Chrome của `renderUrl` đi qua một proxy riêng của bot cũng chặn như vậy, chạy trong giới hạn RAM/CPU của `systemd` (xem [docs/AGENT.md](docs/AGENT.md#đọc-trang-cần-javascript-renderurl)).
+- Chạy `npm audit --omit=dev` định kỳ để biết thư viện nào có lỗ hổng đã công bố.
 
 ## Xử lý sự cố
 
 | Triệu chứng | Cách xử lý |
 |---|---|
-| Bot không trả lời | `pm2 logs homelab-bot`. Đúng `ALLOWED_CHAT_ID` chưa? Token còn hiệu lực không? |
+| Bot không trả lời | `pm2 logs <tên tiến trình>`. Đúng `ALLOWED_CHAT_ID` chưa? Token còn hiệu lực không? |
 | `Thiếu biến môi trường bắt buộc` | Thiếu `TELEGRAM_BOT_TOKEN` hoặc `ALLOWED_CHAT_ID` trong `.env` |
 | `/agent` báo hết quota | Cả bốn model đã hết lượt ngày, thử lại sau khoảng 14:00 đến 15:00 giờ Việt Nam. Xem `/agent quota` |
 | `/agent` báo giới hạn tốc độ | Gửi quá nhanh, đợi vài giây |
 | `/cam`, `/wmap` lỗi | Chưa cài `ffmpeg` hoặc `imagemagick` |
 | `/ping`, `/wol` báo chưa cấu hình | Điền `MAIN_PC_IP`, `MAIN_PC_MAC` |
 | `/temp` trống | `sudo sensors-detect`, cài `lm-sensors` |
-| Đổi `.env` không có tác dụng | `pm2 restart homelab-bot` |
+| Đổi `.env` không có tác dụng | `pm2 restart <tên tiến trình>` |
+| Agent báo "Không tìm thấy systemd-run hoặc Chrome" | Cài `google-chrome-stable`, hoặc đặt `RENDER_ENABLED=0` nếu không cần đọc trang JavaScript |
+| Agent đọc Google Sheets thiếu dòng | Bảng rất dài thì bot báo `truncated`; bảng phải chia sẻ "bất kỳ ai có link đều xem được" |
 | Giờ hiển thị hoặc giờ hẹn bị lệch | Đặt `TIMEZONE` đúng múi giờ rồi restart |
 
 ## Cấu trúc và phát triển
 
 ```text
-bot.js            vòng lặp Telegram và các lệnh
-agent.js          agent Gemini, công cụ, nhiệm vụ tự động
-scheduler.js      lịch nhắc việc và tác vụ định kỳ
-schedule.js       lịch tuần (file Excel trong schedule/)
-morning.js        bản tin sáng (cron)         wmap.js   radar mưa
-motion-check.js   dò chuyển động camera       lib/      RSS, đọc web an toàn, báo cáo Word, tìm lịch sử...
-config.js         đọc và kiểm tra cấu hình    docs/     tài liệu chi tiết
+bot.js                vòng lặp Telegram và các lệnh
+agent.js              agent Gemini, công cụ, nhiệm vụ tự động
+scheduler.js          lịch nhắc việc và tác vụ định kỳ
+schedule.js           lịch tuần (file Excel trong schedule/)
+morning.js, wmap.js   bản tin sáng (cron), radar mưa
+motion-check.js       dò chuyển động camera
+config.js             đọc và kiểm tra cấu hình
+ecosystem.config.js   cấu hình PM2
+lib/                  RSS, đọc web an toàn, Chrome ngầm (render-*, oembed), báo cáo Word, tìm lịch sử...
+test/                 kiểm thử (node --test)
+docs/                 tài liệu chi tiết; docs/superpowers/ là thiết kế và kế hoạch của từng thay đổi (lịch sử)
 ```
 
 ```bash
 npm install
-npm test        # node --test
+npm test        # node --test, chạy cả bộ test (cần Chrome và systemd-run cho 2 test tích hợp, thiếu thì tự bỏ qua)
 ```
 
 Đóng góp được chào đón: mở issue hoặc pull request. Giấy phép [MIT](LICENSE).

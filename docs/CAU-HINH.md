@@ -49,6 +49,7 @@ Chỉ có 2 biến bắt buộc, còn lại bot chạy được với mặc đ�
 | | `RENDER_ENABLED` (`1`), `RENDER_TIMEOUT_SEC` (`60`, 20–90), `RENDER_MAX_PER_HOUR` (`10`), `RENDER_CHROME_PATH` (trống = `google-chrome-stable`) | Công cụ `renderUrl`: đọc trang cần JavaScript bằng Chrome ngầm. Bật/tắt; trần thời gian mỗi lần (bị kẹp theo phần thời gian còn lại của yêu cầu agent); số lần mỗi giờ; đường dẫn Chrome. Xem [AGENT.md](AGENT.md) |
 | | `AGENT_SESSION_IDLE_HOURS` (`48`), `AGENT_HISTORY_TURNS` (`15`), `AGENT_KEEP_REPORTS` (`30`) | Nghỉ bao lâu thì cắt phiên trò chuyện; số lượt gần nhất gửi kèm mỗi lần gọi; số báo cáo Word giữ lại |
 | Bản đồ `/wmap` | `WMAP_WATERMARK` (`homelab-bot`), `WMAP_LOCAL_ZOOM` (`9`), `WMAP_LOCAL_RADIUS` (`1`) | Chữ in ở góc ảnh; độ zoom và độ rộng bản đồ khu vực |
+| PM2 | `PM2_APP_NAME` (`homelab-bot`) | Tên tiến trình bot trong PM2 khi chạy bằng `ecosystem.config.js` (tiến trình bot tự khởi động lại khi vượt 300 MB RAM) |
 | Telegram | `TELEGRAM_API_BASE` (`https://api.telegram.org`) | Đổi khi dùng proxy hoặc máy chủ Bot API cục bộ |
 
 Không có trong `.env`: giờ chạy `morning.js` và `pihole-log.js` do `cron` quyết định (xem `scripts/crontab.example`), còn giờ "reset tuần" (thứ Hai 00:00) cố định vì gắn với lịch tuần.

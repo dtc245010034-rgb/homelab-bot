@@ -49,11 +49,15 @@ Mỗi lần agent gọi model là một "lượt" trong hạn mức ngày, và m
 
 - Mọi thao tác thay đổi dữ liệu (xoá lịch, đặt nhắc, ghi nhớ...) đều hiện nút **Xác nhận / Huỷ** trước khi thực hiện.
 - Nội dung từ web, tin tức, ảnh và hội thoại cũ được coi là **dữ liệu, không phải chỉ dẫn**. Sau khi agent đọc chúng, mọi thao tác có tác động phải được bạn xác nhận, để trang web độc hại không điều khiển được bot.
-- Công cụ đọc web chặn địa chỉ nội bộ (LAN, localhost), nên không bị lợi dụng để truy cập router hay camera của bạn.
+- Công cụ đọc web chặn địa chỉ nội bộ (LAN, localhost) và mọi địa chỉ nằm trong dải mạng của các giao diện trên chính máy (kể cả IPv6 toàn cầu), nên không bị lợi dụng để truy cập router, camera hay dịch vụ trên máy của bạn. Hạn chế đã biết: không phát hiện được truy cập qua IP công cộng của router khi router có chuyển tiếp cổng ra ngoài (NAT hairpin).
 - Nhiệm vụ chạy tự động chỉ được dùng công cụ đọc-và-báo-cáo: không xoá hay sửa gì, không đọc được bộ nhớ cá nhân, lịch hay hội thoại cũ (`getBriefing` ở chế độ này chỉ lấy thời tiết và tin), và chỉ được mở những link xuất hiện trong kết quả tin tức/tìm kiếm của chính lần chạy đó (chống bắt bot gửi dữ liệu ra ngoài qua URL).
 - Trong hội thoại, nếu agent muốn mở một link lạ sau khi đã đọc nội dung web, bot hỏi xác nhận trước.
 - Agent không chạy được lệnh hệ thống tự do.
 - Gói Gemini miễn phí: theo điều khoản của Google, nội dung gửi lên có thể được dùng để cải thiện sản phẩm của họ. Đừng nhờ agent xử lý thông tin bạn không muốn chia sẻ.
+
+## Đọc bảng tính Google Sheets
+
+Link Google Sheets (`docs.google.com/spreadsheets/d/<id>`) được `fetchUrl` tự đổi sang bản xuất CSV của đúng tab (theo `gid` trong link), gọn và đầy đủ hơn trang HTML. Bảng phải được chia sẻ "bất kỳ ai có link đều xem được". Trang thường được đọc tối đa 12.000 ký tự, CSV của Google Sheets tối đa 40.000. Nếu kết quả có `truncated: true` nghĩa là agent chưa thấy hết nội dung; agent được dặn không tự thêm hay sửa lịch dựa trên phần thiếu mà phải báo bạn.
 
 ## Đọc trang cần JavaScript (`renderUrl`)
 
