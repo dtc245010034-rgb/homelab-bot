@@ -159,6 +159,7 @@ function getSettings(env = process.env) {
       maxUnattendedLoops: num(env.AGENT_MAX_UNATTENDED_LOOPS, 12, { min: 1, max: 40, int: true }),
       unattendedTimeoutMs: num(env.AGENT_UNATTENDED_TIMEOUT_MIN, 5, { min: 1, max: 60 }) * 60_000,
       requestTimeoutMs: num(env.AGENT_REQUEST_TIMEOUT_SEC, 90, { min: 10, max: 600 }) * 1000,
+      geminiTimeoutMs: num(env.AGENT_GEMINI_TIMEOUT_SEC, 25, { min: 5, max: 120 }) * 1000,
       confirmTimeoutMs: num(env.AGENT_CONFIRM_TIMEOUT_SEC, 120, { min: 10, max: 3600 }) * 1000,
       sessionIdleMs: num(env.AGENT_SESSION_IDLE_HOURS, 48, { min: 1, max: 24 * 90 }) * 3600_000,
       historyTurns: num(env.AGENT_HISTORY_TURNS, 15, { min: 2, max: 100, int: true }),

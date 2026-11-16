@@ -13,6 +13,7 @@ const { stripInlineData, DEFAULT_IMAGE_PROMPT } = require('./lib/agent-image');
 const { createConfirmStore, confirmKeyboard, parseConfirmCallback } = require('./lib/agent-confirm');
 const { orderModels, bumpKind, formatKindUsage } = require('./lib/agent-models');
 const historyLib = require('./lib/agent-history');
+const { callWithFallback, formatSlowNote } = require('./lib/agent-gemini');
 
 const { getSettings } = require('./config');
 const S = getSettings();
@@ -45,6 +46,8 @@ const UNATTENDED_TIMEOUT_MS   = A.unattendedTimeoutMs;
 const TELEGRAM_TEXT_MAX       = 3800; // gioi han Telegram 4096, tru phan the HTML
 const REQUEST_TIMEOUT_MS      = A.requestTimeoutMs;
 const STALL_NOTICE_MS         = 12_000;
+const GEMINI_TIMEOUT_MS       = A.geminiTimeoutMs; // moi lan goi Gemini (hoi dap); viec nen duoc nhan rong hon
+const SLOW_MODEL_PENALTY_MS   = 15 * 60_000;       // model vua treo bi day xuong cuoi hang trong ngan ay
 const CONFIRM_TIMEOUT_MS      = A.confirmTimeoutMs;
 const SESSION_IDLE_ARCHIVE_MS = A.sessionIdleMs;
 const TRIM_LAST_TURNS         = A.historyTurns; // so luot user-text gan nhat giu lai khi goi API, phan cu van con nguyen trong file session
@@ -300,44 +303,33 @@ function extractDailyQuotaValue(e) {
 // Da xac nhan qua test that (2026-09-15): quota free tier tinh RIENG theo tung model
 // (quotaId co "PerModel"), nen het quota model nay van con dung duoc model khac trong MODEL_CANDIDATES.
 // kind: 'interactive' (hoi dap, mac dinh) | 'scheduled' (nhiem vu hen gio) | 'summary' (tom tat phien) - xem lib/agent-models.js.
-async function callGeminiWithRetry(payloadBase, kind = 'interactive') {
+// meta (tuy chon): mang de gom cac lan goi {model, ms, outcome} cua 1 yeu cau, dung de giai thich do cham that.
+const slowUntil = new Map(); // model -> thoi diem het bi coi la cham (chi trong RAM, khoi dong lai la xoa)
+async function callGeminiWithRetry(payloadBase, kind = 'interactive', meta = null) {
   const state = readQuota();
+  const now = Date.now();
   const ordered = orderModels({
     candidates: MODEL_CANDIDATES, currentModel: state.currentModel, exhausted: state.exhaustedModels,
     kind, backgroundModel: A.backgroundModel,
+    demoted: MODEL_CANDIDATES.filter(m => (slowUntil.get(m) || 0) > now),
   });
-
-  let lastError;
-  for (const model of ordered) {
-    const payload = { ...payloadBase, model };
-    try {
-      incrementQuota(model, kind);
-      return await ai.models.generateContent(payload);
-    } catch (e) {
-      const status = e?.status || e?.response?.status;
-      const perMinute = status === 429 && isPerMinuteRateLimit(e);
-
-      if (!status || (status >= 500 && status < 600) || perMinute) {
-        await new Promise(r => setTimeout(r, perMinute ? 7000 : 1500));
-        try {
-          incrementQuota(model, kind);
-          return await ai.models.generateContent(payload);
-        } catch (e2) {
-          lastError = e2;
-          continue; // thu model tiep theo neu retry van fail
-        }
-      }
-
-      if (status === 429) {
-        markModelExhausted(model, extractDailyQuotaValue(e), kind);
-        lastError = e;
-        continue; // het quota ngay that - thu model tiep theo
-      }
-
-      throw e; // loi khac (vd sai schema) khong lien quan quota - khong co ich gi khi doi model
-    }
-  }
-  throw lastError || new Error('Tất cả model Gemini trong danh sách đều không khả dụng hôm nay.');
+  // Viec nen (hen gio, tom tat) doc nhieu hon nen duoc cho lau hon cau hoi dang cho nguoi.
+  const timeoutMs = kind === 'interactive' ? GEMINI_TIMEOUT_MS : Math.max(60_000, GEMINI_TIMEOUT_MS);
+  return callWithFallback({
+    models: ordered,
+    timeoutMs,
+    generate: ({ model, signal }) => ai.models.generateContent({
+      ...payloadBase, model, config: { ...(payloadBase.config || {}), abortSignal: signal },
+    }),
+    isPerMinute: isPerMinuteRateLimit,
+    onAttempt: (model) => incrementQuota(model, kind),
+    onDailyExhausted: (model, e) => markModelExhausted(model, extractDailyQuotaValue(e), kind),
+    record: (r) => {
+      if (r.outcome === 'timeout') slowUntil.set(r.model, Date.now() + SLOW_MODEL_PENALTY_MS);
+      if (meta) meta.push(r);
+      try { logToolCall({ tool: 'gemini', kind, model: r.model, ms: r.ms, outcome: r.outcome }); } catch (e) { /* log loi khong duoc lam hong yeu cau */ }
+    },
+  });
 }
 
 // ─── Tom tat phien khi luu tru: 1 luot goi Gemini (model nhe, khong kem tool) / phien, chay nen khong chan hoi thoai ──
@@ -844,7 +836,9 @@ function createAgent(deps) {
     'TIẾT KIỆM LƯỢT GỌI (mỗi lượt gọi model tốn quota miễn phí): cần từ 2 nguồn trở lên trong thời tiết/tin/lịch/nhắc việc/trạng thái server thì gọi getBriefing MỘT lần; nhiều tool độc lập thì gọi cùng lượt; hỏi lại chuyện đã nói trước đây thì dùng searchHistory thay vì đoán. ' +
     'QUY TẮC VỀ VIỆC TRONG TƯƠNG LAI: không được hứa sẽ làm việc gì vào thời điểm sau (vd "đến 10h ta sẽ đi tìm tin") nếu chưa gọi tool đặt lịch tương ứng và nhận kết quả ok. ' +
     'setReminder chỉ gửi lại đúng câu chữ rồi ghim, không tự làm gì khác. Muốn đến giờ bot TỰ LÀM việc (tìm tin, tóm tắt, làm báo cáo Word) thì phải gọi scheduleAgentTask. ' +
-    'remember chỉ lưu ghi chú, không tự kích hoạt hành động nào. Khi nói về việc đã đặt, chỉ nêu đúng những gì tool trả về (id, nextFireAt); nếu không chắc cơ chế thì nói không chắc, đừng đoán.';
+    'remember chỉ lưu ghi chú, không tự kích hoạt hành động nào. Khi nói về việc đã đặt, chỉ nêu đúng những gì tool trả về (id, nextFireAt); nếu không chắc cơ chế thì nói không chắc, đừng đoán. ' +
+    'TRUNG THỰC VỀ HỆ THỐNG: bạn KHÔNG thấy tiến trình đang chạy, tốc độ mạng, thời gian chờ Gemini hay lý do một yêu cầu chậm. Khi được hỏi vì sao chậm/kẹt/lỗi: chỉ nêu những gì tool vừa trả về (ví dụ getSystemStatus) hoặc dòng ⏱ hệ thống gắn kèm; nếu không có số liệu thì nói thẳng là không có số liệu. ' +
+    'Tuyệt đối không bịa nguyên nhân (như đọc lại ngữ cảnh, kiểm tra kỹ lưỡng) và không nói đã kiểm tra tiến trình/hệ thống/log nếu chưa gọi tool tương ứng. Không trấn an kiểu mọi thứ bình thường khi chưa có dữ liệu.';
 
   const TELEGRAM_FORMAT_NOTE =
     'ĐỊNH DẠNG CÂU TRẢ LỜI (gửi nguyên văn qua Telegram, tối đa khoảng 3000 ký tự): chia theo mục bằng dòng "### <1 emoji> Tên mục" (đúng 1 emoji hợp chủ đề đặt đầu tên mục, ví dụ 🧰 công cụ, ⏳ lịch hẹn, 📰 tin tức, 🖥 hệ thống, ✅ kết quả), ' +
@@ -1023,12 +1017,8 @@ function createAgent(deps) {
       // (mot cau user chua duoc tra loi, hoac 1 functionResponse chua duoc model xu ly tiep).
       // Gui nguyen contents nhu vay cho Gemini se bi tu choi 400 "function call turn phai
       // ngay sau user/functionResponse turn". Cat bo cac luot treo do truoc khi ghi cau hoi moi.
-      let trimmed = false;
-      while (session.contents.length > 0 && session.contents[session.contents.length - 1].role !== 'model') {
-        session.contents.pop();
-        trimmed = true;
-      }
-      if (trimmed) saveSession(chatId, session);
+      const repaired = historyLib.repairDanglingTail(session.contents);
+      if (repaired.length !== session.contents.length) { session.contents = repaired; saveSession(chatId, session); }
 
       const userParts = [{ text: userText }];
       if (image) userParts.push({ inlineData: { mimeType: image.mimeType, data: image.data } });
@@ -1041,7 +1031,9 @@ function createAgent(deps) {
       }, STALL_NOTICE_MS);
 
       const systemInstruction = buildSystemInstruction();
-      const deadline = Date.now() + REQUEST_TIMEOUT_MS;
+      const startedAt = Date.now();
+      const deadline = startedAt + REQUEST_TIMEOUT_MS;
+      const geminiCalls = []; // {model, ms, outcome} cua moi lan goi Gemini trong yeu cau nay
       prov.deadline = deadline; // renderUrl ke tran thoi gian theo phan con lai cua yeu cau
 
       let finalText = null;
@@ -1053,7 +1045,7 @@ function createAgent(deps) {
         const response = await callGeminiWithRetry({
           contents: historyLib.compactForApi(trimForApi(session.contents)),
           config: { systemInstruction, tools: [{ functionDeclarations }] },
-        });
+        }, 'interactive', geminiCalls);
 
         const modelParts = response.candidates?.[0]?.content?.parts || [{ text: response.text || '' }];
         appendContents(chatId, session, [{ role: 'model', parts: modelParts }]);
@@ -1081,10 +1073,14 @@ function createAgent(deps) {
 
       clearTimeout(stallTimer);
 
+      const slowNote = formatSlowNote(geminiCalls, Date.now() - startedAt);
+      const slowHtml = slowNote ? `\n<blockquote>${escapeHtml(slowNote)}</blockquote>` : '';
       if (timedOut) {
-        await send(chatId, '<b>QUÁ THỜI GIAN XỬ LÝ</b>\n<blockquote>Yêu cầu mất quá lâu (&gt;90s), đã huỷ.</blockquote>');
+        // Dong lich su lai bang 1 luot model bang chu: ket qua cac tool da chay van con, va luot sau khong bi goi lai tool vo ich.
+        appendContents(chatId, session, [{ role: 'model', parts: [{ text: '(Yêu cầu trước quá thời gian xử lý nên chưa trả lời xong. Các công cụ đã chạy ở trên có kết quả như đã ghi.)' }] }]);
+        await send(chatId, `<b>QUÁ THỜI GIAN XỬ LÝ</b>\n<blockquote>Yêu cầu mất quá lâu (&gt;${Math.round(REQUEST_TIMEOUT_MS / 1000)}s), đã huỷ.</blockquote>${slowHtml}`);
       } else {
-        await send(chatId, `<b>🪄 AGENT</b>\n${mdToTelegramHtml(finalText)}`);
+        await send(chatId, `<b>🪄 AGENT</b>\n${mdToTelegramHtml(finalText)}${slowHtml}`);
       }
     } catch (e) {
       clearTimeout(stallTimer);

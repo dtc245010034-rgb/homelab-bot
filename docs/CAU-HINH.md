@@ -45,7 +45,7 @@ Chỉ có 2 biến bắt buộc, còn lại bot chạy được với mặc đ�
 | | `AGENT_BACKGROUND_MODEL` (`gemini-3.1-flash-lite`) | Model nhẹ thử trước cho nhiệm vụ hẹn giờ và tóm tắt phiên. Phải nằm trong chuỗi model ở trên; `off` để tắt |
 | | `AGENT_SUMMARIZE` (`1`), `AGENT_SUMMARY_MIN_TURNS` (`3`) | Tóm tắt phiên khi lưu trữ; chỉ tóm tắt phiên có ít nhất số câu hỏi này |
 | Agent: giới hạn | `AGENT_MAX_TOOL_LOOPS` (`8`), `AGENT_MAX_UNATTENDED_LOOPS` (`12`), `AGENT_UNATTENDED_TIMEOUT_MIN` (`5`) | Số lượt gọi công cụ tối đa mỗi câu hỏi; mỗi tác vụ hẹn giờ; thời gian tối đa của tác vụ hẹn giờ |
-| | `AGENT_REQUEST_TIMEOUT_SEC` (`90`), `AGENT_CONFIRM_TIMEOUT_SEC` (`120`) | Chờ Gemini trả lời; chờ bạn bấm Đồng ý/Huỷ |
+| | `AGENT_REQUEST_TIMEOUT_SEC` (`90`), `AGENT_GEMINI_TIMEOUT_SEC` (`25`, 5–120), `AGENT_CONFIRM_TIMEOUT_SEC` (`120`) | Thời gian tối đa cả yêu cầu; mỗi lần gọi Gemini (quá hạn thì tự đổi model); chờ bạn bấm Đồng ý/Huỷ |
 | | `RENDER_ENABLED` (`1`), `RENDER_TIMEOUT_SEC` (`60`, 20–90), `RENDER_MAX_PER_HOUR` (`10`), `RENDER_CHROME_PATH` (trống = `google-chrome-stable`) | Công cụ `renderUrl`: đọc trang cần JavaScript bằng Chrome ngầm. Bật/tắt; trần thời gian mỗi lần (bị kẹp theo phần thời gian còn lại của yêu cầu agent); số lần mỗi giờ; đường dẫn Chrome. Xem [AGENT.md](AGENT.md) |
 | | `AGENT_SESSION_IDLE_HOURS` (`48`), `AGENT_HISTORY_TURNS` (`15`), `AGENT_KEEP_REPORTS` (`30`) | Nghỉ bao lâu thì cắt phiên trò chuyện; số lượt gần nhất gửi kèm mỗi lần gọi; số báo cáo Word giữ lại |
 | Bản đồ `/wmap` | `WMAP_WATERMARK` (`homelab-bot`), `WMAP_LOCAL_ZOOM` (`9`), `WMAP_LOCAL_RADIUS` (`1`) | Chữ in ở góc ảnh; độ zoom và độ rộng bản đồ khu vực |

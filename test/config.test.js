@@ -217,3 +217,10 @@ test('getSettings: RENDER_ENABLED=0 tat, RENDER_MAX_PER_HOUR va RENDER_CHROME_PA
   assert.equal(R.maxPerHour, 3);
   assert.equal(R.chromePath, '/opt/chrome');
 });
+
+test('AGENT.geminiTimeoutMs: mac dinh 25s, sai thi ve mac dinh, kep 5-120s', () => {
+  assert.equal(getSettings({}).AGENT.geminiTimeoutMs, 25_000);
+  assert.equal(getSettings({ AGENT_GEMINI_TIMEOUT_SEC: '40' }).AGENT.geminiTimeoutMs, 40_000);
+  assert.equal(getSettings({ AGENT_GEMINI_TIMEOUT_SEC: 'abc' }).AGENT.geminiTimeoutMs, 25_000);
+  assert.equal(getSettings({ AGENT_GEMINI_TIMEOUT_SEC: '1' }).AGENT.geminiTimeoutMs, 25_000);
+});

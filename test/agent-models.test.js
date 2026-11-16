@@ -50,3 +50,17 @@ test('bumpKind + formatKindUsage: dem luot goi / so viec theo loai', () => {
   assert.match(line, /hẹn giờ: 1 lượt/);
   assert.equal(formatKindUsage({}), '');
 });
+
+test('orderModels: model dang bi danh dau cham bi day xuong cuoi, giu thu tu con lai', () => {
+  assert.deepEqual(
+    orderModels({ candidates: C, currentModel: 'pro', demoted: ['pro', 'flash'] }),
+    ['preview', 'lite', 'pro', 'flash'],
+  );
+});
+
+test('orderModels: tat ca deu bi danh dau cham thi giu nguyen thu tu xoay vong', () => {
+  assert.deepEqual(
+    orderModels({ candidates: C, currentModel: 'flash', demoted: C }),
+    ['flash', 'preview', 'lite', 'pro'],
+  );
+});

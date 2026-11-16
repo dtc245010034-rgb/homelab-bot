@@ -123,3 +123,27 @@ test('compactForApi: gop luot cung vai tro, bo luot rong, khong co lich su cu th
   const first = [u('chi mot cau')];
   assert.equal(compactForApi(first), first);
 });
+
+const { repairDanglingTail } = require('../lib/agent-history');
+
+test('repairDanglingTail: phien sach (cuoi la model chu) giu nguyen', () => {
+  const c = [u('a'), m('b')];
+  assert.deepEqual(repairDanglingTail(c), c);
+});
+
+test('repairDanglingTail: cat luot user chua duoc tra loi', () => {
+  assert.deepEqual(repairDanglingTail([u('a'), m('b'), u('c')]), [u('a'), m('b')]);
+});
+
+test('repairDanglingTail: model goi tool ma khong co ket qua -> cat ca luot goi va cau hoi cua no', () => {
+  assert.deepEqual(repairDanglingTail([u('a'), m('b'), u('c'), call('x')]), [u('a'), m('b')]);
+});
+
+test('repairDanglingTail: ket qua tool chua duoc model xu ly -> cat toi het luot do', () => {
+  assert.deepEqual(repairDanglingTail([u('a'), m('b'), u('c'), call('x'), resp('x', 'ok')]), [u('a'), m('b')]);
+});
+
+test('repairDanglingTail: lich su rong hoac chi 1 cau hoi -> rong', () => {
+  assert.deepEqual(repairDanglingTail([]), []);
+  assert.deepEqual(repairDanglingTail([u('a')]), []);
+});
