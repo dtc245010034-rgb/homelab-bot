@@ -47,7 +47,7 @@ const TELEGRAM_TEXT_MAX       = 3800; // gioi han Telegram 4096, tru phan the HT
 const REQUEST_TIMEOUT_MS      = A.requestTimeoutMs;
 const STALL_NOTICE_MS         = 12_000;
 const GEMINI_TIMEOUT_MS       = A.geminiTimeoutMs; // moi lan goi Gemini (hoi dap); viec nen duoc nhan rong hon
-const SLOW_MODEL_PENALTY_MS   = 15 * 60_000;       // model vua treo bi day xuong cuoi hang trong ngan ay
+const SLOW_MODEL_PENALTY_MS   = 60 * 60_000;       // model vua treo/qua tai (503) bi day xuong cuoi hang trong ngan nay
 const CONFIRM_TIMEOUT_MS      = A.confirmTimeoutMs;
 const SESSION_IDLE_ARCHIVE_MS = A.sessionIdleMs;
 const TRIM_LAST_TURNS         = A.historyTurns; // so luot user-text gan nhat giu lai khi goi API, phan cu van con nguyen trong file session
@@ -324,8 +324,8 @@ async function callGeminiWithRetry(payloadBase, kind = 'interactive', meta = nul
     isPerMinute: isPerMinuteRateLimit,
     onAttempt: (model) => incrementQuota(model, kind),
     onDailyExhausted: (model, e) => markModelExhausted(model, extractDailyQuotaValue(e), kind),
+    onModelFailed: (model) => slowUntil.set(model, Date.now() + SLOW_MODEL_PENALTY_MS),
     record: (r) => {
-      if (r.outcome === 'timeout') slowUntil.set(r.model, Date.now() + SLOW_MODEL_PENALTY_MS);
       if (meta) meta.push(r);
       try { logToolCall({ tool: 'gemini', kind, model: r.model, ms: r.ms, outcome: r.outcome }); } catch (e) { /* log loi khong duoc lam hong yeu cau */ }
     },

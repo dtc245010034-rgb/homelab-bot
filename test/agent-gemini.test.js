@@ -103,3 +103,47 @@ test('formatSlowNote: khong co timeout nhung tong thoi gian lau -> neu model cha
   assert.match(s, /gemini-3\.6-flash/);
   assert.match(s, /47s/);
 });
+
+test('onModelFailed: goi khi model bi bo vi timeout, khong goi cho model thanh cong', async () => {
+  const failed = [];
+  await callWithFallback(base({
+    generate: ({ model }) => (model === 'a' ? never() : Promise.resolve({ model })),
+    onModelFailed: (m, e) => failed.push([m, e.isTimeout === true]),
+  }));
+  assert.deepEqual(failed, [['a', true]]);
+});
+
+test('onModelFailed: 503 roi thu lai thanh cong thi KHONG goi (loi le)', async () => {
+  const failed = [];
+  let n = 0;
+  const err = Object.assign(new Error('high demand'), { status: 503 });
+  const r = await callWithFallback(base({
+    generate: async ({ model }) => { if (model === 'a' && n++ === 0) throw err; return { model }; },
+    onModelFailed: (m) => failed.push(m),
+  }));
+  assert.equal(r.model, 'a');
+  assert.deepEqual(failed, []);
+});
+
+test('onModelFailed: 503 hai lan lien tiep thi goi roi sang model ke tiep', async () => {
+  const failed = [];
+  const err = Object.assign(new Error('high demand'), { status: 503 });
+  const r = await callWithFallback(base({
+    generate: async ({ model }) => { if (model === 'a') throw err; return { model }; },
+    onModelFailed: (m, e) => failed.push([m, e.status]),
+  }));
+  assert.equal(r.model, 'b');
+  assert.deepEqual(failed, [['a', 503]]);
+});
+
+test('onModelFailed: loi 400 va het quota ngay khong goi (da co duong rieng)', async () => {
+  const failed = [];
+  const quota = Object.assign(new Error('{"x":1}'), { status: 429 });
+  await callWithFallback(base({
+    generate: async ({ model }) => { if (model === 'a') throw quota; return {}; },
+    onModelFailed: (m) => failed.push(m),
+  }));
+  const bad = Object.assign(new Error('bad'), { status: 400 });
+  await assert.rejects(callWithFallback(base({ generate: async () => { throw bad; }, onModelFailed: (m) => failed.push(m) })), /bad/);
+  assert.deepEqual(failed, []);
+});
